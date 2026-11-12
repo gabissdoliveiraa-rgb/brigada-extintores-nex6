@@ -1,0 +1,144 @@
+{
+  "entities": {
+    "Extinguisher": {
+      "title": "Extinguisher",
+      "description": "Extintor de incêndio cadastrado no sistema SENAI",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "type": { "type": "string" },
+        "floor": { "type": "string" },
+        "location": { "type": "string" },
+        "capacity": { "type": "string" },
+        "status": { "type": "string" },
+        "validityDate": { "type": "string" },
+        "nextInspectionDate": { "type": "string" },
+        "qrCode": { "type": "string" },
+        "notes": { "type": "string" },
+        "lastInspectedAt": { "type": "string" }
+      },
+      "required": ["code", "type", "floor", "location", "status"]
+    },
+    "BrigadeMember": {
+      "title": "BrigadeMember",
+      "description": "Membro integrante da brigada de incêndio SENAI",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "isLeader": { "type": "boolean" },
+        "jobTitle": { "type": "string" },
+        "functionDescription": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "responsibleFloor": { "type": "string" },
+        "trainingStatus": { "type": "string" },
+        "trainingExpirationDate": { "type": "string" },
+        "avatarUrl": { "type": "string" }
+      },
+      "required": ["name", "role", "email"]
+    },
+    "Inspection": {
+      "title": "Inspection",
+      "description": "Registro de inspeção e vistoria periódica de extintor",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "code": { "type": "string" },
+        "extinguisherCode": { "type": "string" },
+        "extinguisherType": { "type": "string" },
+        "date": { "type": "string" },
+        "responsible": { "type": "string" },
+        "status": { "type": "string" },
+        "floor": { "type": "string" },
+        "location": { "type": "string" },
+        "capacity": { "type": "string" },
+        "validityDate": { "type": "string" },
+        "nextInspectionDate": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["extinguisherCode", "date", "responsible", "status"]
+    },
+    "Notice": {
+      "title": "Notice",
+      "description": "Aviso de manutenção preventiva ou vencimento de extintores",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "description": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string" },
+        "extinguisherCode": { "type": "string" }
+      },
+      "required": ["type", "description", "status"]
+    },
+    "ActivityLog": {
+      "title": "ActivityLog",
+      "description": "Log auditável de ações executadas no sistema",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userName": { "type": "string" },
+        "userRole": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "category": { "type": "string" },
+        "actionType": { "type": "string" },
+        "description": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "formattedDateTime": { "type": "string" },
+        "targetCode": { "type": "string" },
+        "targetFloor": { "type": "string" },
+        "details": { "type": "string" }
+      },
+      "required": ["userName", "category", "actionType", "description"]
+    },
+    "RegisteredUser": {
+      "title": "RegisteredUser",
+      "description": "Usuário autorizado a acessar o sistema SENAI",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "responsibleSector": { "type": "string" },
+        "birthDate": { "type": "string" },
+        "isLeader": { "type": "boolean" },
+        "trainingStatus": { "type": "string" },
+        "password": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "role", "email"]
+    }
+  },
+  "firestore": {
+    "/extinguishers/{extinguisherId}": {
+      "schema": "Extinguisher",
+      "description": "Coleção de extintores de combate a incêndio do SENAI"
+    },
+    "/brigade_members/{memberId}": {
+      "schema": "BrigadeMember",
+      "description": "Coleção de brigadistas e líderes de emergência"
+    },
+    "/inspections/{inspectionId}": {
+      "schema": "Inspection",
+      "description": "Coleção de inspeções e vistorias técnicas"
+    },
+    "/notices/{noticeId}": {
+      "schema": "Notice",
+      "description": "Coleção de avisos operacionais"
+    },
+    "/activity_logs/{logId}": {
+      "schema": "ActivityLog",
+      "description": "Coleção de logs de atividades para auditoria"
+    },
+    "/users/{userId}": {
+      "schema": "RegisteredUser",
+      "description": "Coleção de usuários autorizados do sistema"
+    }
+  }
+}

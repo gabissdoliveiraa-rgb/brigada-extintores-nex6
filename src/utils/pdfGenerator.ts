@@ -50,22 +50,32 @@ export function generatePdfReport({
     doc.setFontSize(10);
     doc.text('BRIGADA & EXTINTORES', pageWidth - 14, 15, { align: 'right' });
 
+    const title =
+      period === 'Diário'
+        ? 'RELATÓRIO OPERACIONAL DIÁRIO DE EXTINTORES'
+        : period === 'Semanal'
+        ? 'RELATÓRIO SEMANAL DE CONFORMIDADE PREVENTIVA'
+        : 'RELATÓRIO MENSAL DE AUDITORIA GERAL (NBR 12962)';
+
+    const subtitle =
+      period === 'Diário'
+        ? 'Setor de Segurança e Saúde no Trabalho (SST) - SENAI-SP | Rotina Diária & Vistorias Imediatas'
+        : period === 'Semanal'
+        ? 'Setor de Segurança e Saúde no Trabalho (SST) - SENAI-SP | Acompanhamento Semanal por Pavimento'
+        : 'Setor de Segurança e Saúde no Trabalho (SST) - SENAI-SP | Auditoria Mensal dos 123 Extintores & Brigada';
+
     // 2. Report Sub-header & Title
     let currentY = 32;
     doc.setTextColor(30, 41, 59);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(14);
-    doc.text('RELATÓRIO TÉCNICO DE CONFORMIDADE E SEGURANÇA', 14, currentY);
+    doc.setFontSize(13);
+    doc.text(title, 14, currentY);
 
     currentY += 6;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9);
     doc.setTextColor(100, 116, 139);
-    doc.text(
-      `Setor de Segurança e Saúde no Trabalho (SST) - SENAI-SP | Norma Regulamentadora NR-23`,
-      14,
-      currentY
-    );
+    doc.text(subtitle, 14, currentY);
 
     // 3. Metadata Box
     currentY += 6;
@@ -103,7 +113,7 @@ export function generatePdfReport({
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(30, 41, 59);
-    doc.text('1. Indicadores de Prontidão e Auditoria', 14, currentY);
+    doc.text(`1. Indicadores de Prontidão (${period})`, 14, currentY);
 
     currentY += 4;
     const cardWidth = (pageWidth - 28 - 9) / 4;
@@ -114,7 +124,7 @@ export function generatePdfReport({
     doc.roundedRect(14, currentY, cardWidth, cardHeight, 1.5, 1.5, 'F');
     doc.setFontSize(8);
     doc.setTextColor(100, 116, 139);
-    doc.text('TOTAL EQUIPAMENTOS', 14 + cardWidth / 2, currentY + 5, { align: 'center' });
+    doc.text('TOTAL AUDITADO', 14 + cardWidth / 2, currentY + 5, { align: 'center' });
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(15, 23, 42);
@@ -139,7 +149,7 @@ export function generatePdfReport({
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(180, 83, 9);
-    doc.text('A VENCER (30 DIAS)', card3X + cardWidth / 2, currentY + 5, { align: 'center' });
+    doc.text('A VENCER (ALERTA)', card3X + cardWidth / 2, currentY + 5, { align: 'center' });
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
     doc.text(`${metrics.expiring}`, card3X + cardWidth / 2, currentY + 12, { align: 'center' });
@@ -158,13 +168,31 @@ export function generatePdfReport({
 
     currentY += cardHeight + 8;
 
-    // 5. Equipment Inventory Table
+    // 5. Equipment Inventory Table tailored by Period
+    const sectionTitle =
+      period === 'Diário'
+        ? '2. Vistorias do Dia & Equipamentos com Prioridade de Ação'
+        : period === 'Semanal'
+        ? '2. Acompanhamento Semanal de Extintores e Prazos Curtos'
+        : '2. Inventário Geral dos 123 Extintores da Planta SENAI (NBR 12962)';
+
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(30, 41, 59);
-    doc.text('2. Inventário Geral de Extintores de Incêndio', 14, currentY);
+    doc.text(sectionTitle, 14, currentY);
 
-    const tableRows = extinguishers.map((ext) => [
+    // Filter displayed extinguishers based on period scope:
+    // Diário: prioritize items requiring immediate check or attention, followed by daily routine
+    // Semanal: prioritize items needing weekly inspection or expiring soon
+    // Mensal: full comprehensive 123-extinguisher inventory
+    const displayedExts =
+      period === 'Diário'
+        ? [...extinguishers.filter((e) => e.status !== 'Em dia'), ...extinguishers.filter((e) => e.status === 'Em dia')].slice(0, 35)
+        : period === 'Semanal'
+        ? [...extinguishers.filter((e) => e.status === 'Atenção' || e.status === 'Vencido'), ...extinguishers.filter((e) => e.status === 'Em dia')].slice(0, 60)
+        : extinguishers;
+
+    const tableRows = displayedExts.map((ext) => [
       ext.code,
       ext.type,
       ext.floor,
@@ -231,7 +259,7 @@ export function generatePdfReport({
     doc.setFontSize(8);
     doc.setTextColor(71, 85, 105);
     doc.text(
-      'Documento emitido eletronicamente pelo Sistema Brigada & Extintores SENAI para fins de conformidade legal.',
+      `Documento emitido eletronicamente pelo Sistema Brigada & Extintores SENAI (${period}) para fins de conformidade legal.`,
       14,
       currentY
     );
@@ -265,7 +293,7 @@ export function generatePdfReport({
 
     // 7. Save & Download the File
     const sanitizedDate = selectedDate.replace(/[/\\?%*:|"<>]/g, '-');
-    const filename = `Relatorio_Brigada_Extintores_SENAI_${sanitizedDate}.pdf`;
+    const filename = `Relatorio_${period}_SENAI_${sanitizedDate}.pdf`;
 
     // Trigger client-side file download
     if (typeof window !== 'undefined' && typeof document !== 'undefined') {

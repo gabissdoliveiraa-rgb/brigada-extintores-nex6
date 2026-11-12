@@ -25,6 +25,7 @@ import {
   dbActivityLogs,
   importFullDatabase,
   resetDatabaseToInitial,
+  initFirestoreRealtimeSync,
 } from './services/db';
 import { ADMIN_USER, EMPLOYEE_USER } from './data/initialData';
 import { Sidebar, ViewTab } from './components/Sidebar';
@@ -109,6 +110,28 @@ export default function App() {
       localStorage.removeItem('senai_brigada_user');
     }
   }, [user]);
+
+  // Real-time synchronization across devices via Firestore
+  useEffect(() => {
+    const cleanupFirestore = initFirestoreRealtimeSync();
+
+    const unsubExt = dbExtinguishers.subscribe((data) => setExtinguishers(data));
+    const unsubMembers = dbBrigade.subscribe((data) => setMembers(data));
+    const unsubUsers = dbUsers.subscribe((data) => setUsers(data));
+    const unsubInsp = dbInspections.subscribe((data) => setInspections(data));
+    const unsubNotices = dbNotices.subscribe((data) => setNotices(data));
+    const unsubLogs = dbActivityLogs.subscribe((data) => setActivityLogs(data));
+
+    return () => {
+      cleanupFirestore();
+      unsubExt();
+      unsubMembers();
+      unsubUsers();
+      unsubInsp();
+      unsubNotices();
+      unsubLogs();
+    };
+  }, []);
 
   // Activity Logger Helper
   const logActivity = (

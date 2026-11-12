@@ -150,5 +150,5 @@ test('generatePdfReport constructs valid PDF document and filename', async () =>
   });
 
   assert.equal(result.success, true);
-  assert.equal(result.filename, 'Relatorio_Brigada_Extintores_SENAI_12-10-2026.pdf');
+  assert.equal(result.filename, 'Relatorio_Diário_SENAI_12-10-2026.pdf');
 });
