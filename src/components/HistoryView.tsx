@@ -23,8 +23,10 @@ import {
   Trash2,
   Clock,
   Download,
+  FileDown,
   AlertCircle,
 } from 'lucide-react';
+import { generateActivityHistoryPdf } from '../utils/pdfGenerator';
 
 interface HistoryViewProps {
   user: UserProfile;
@@ -103,12 +105,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     }
   };
 
-  const handleExportJson = () => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(activityLogs, null, 2));
-    const dlAnchorElem = document.createElement('a');
-    dlAnchorElem.setAttribute('href', dataStr);
-    dlAnchorElem.setAttribute('download', `historico_atividades_senai_${new Date().toISOString().slice(0, 10)}.json`);
-    dlAnchorElem.click();
+  const handleExportPdf = () => {
+    generateActivityHistoryPdf({
+      user,
+      logs: filteredLogs.length > 0 ? filteredLogs : activityLogs,
+      categoryFilter: selectedCategory,
+      userFilter: selectedUser,
+    });
   };
 
   return (
@@ -126,12 +129,12 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
 
         <div className="flex items-center gap-2">
           <button
-            onClick={handleExportJson}
-            className="flex items-center gap-1.5 px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-lg shadow-xs transition-colors cursor-pointer"
-            title="Exportar dados do histórico"
+            onClick={handleExportPdf}
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg shadow-xs transition-all active:scale-95 cursor-pointer"
+            title="Exportar histórico de atividades em PDF oficial"
           >
-            <Download className="w-3.5 h-3.5" />
-            <span>Exportar</span>
+            <FileDown className="w-3.5 h-3.5" />
+            <span>Exportar PDF</span>
           </button>
 
           {user.role === 'Administrador' && onClearHistory && (

@@ -154,7 +154,7 @@ export const ExtinguisherQrModal: React.FC<ExtinguisherQrModalProps> = ({
             </p>
 
             <p className="text-[10px] text-slate-400 max-w-xs">
-              Aponte a câmera no aplicativo para abrir a ficha completa deste extintor.
+              Aponte a câmera no site para abrir a ficha completa deste extintor.
             </p>
           </div>
 

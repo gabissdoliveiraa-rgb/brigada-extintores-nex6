@@ -13,7 +13,6 @@ import {
   Upload,
   CheckCircle2,
   RefreshCw,
-  Sparkles,
 } from 'lucide-react';
 
 interface QrCameraScannerProps {
@@ -269,10 +268,6 @@ export const QrCameraScanner: React.FC<QrCameraScannerProps> = ({
     reader.readAsDataURL(file);
   };
 
-  // Test simulator trigger
-  const handleSimulate = (code: string) => {
-    handleDetected(code);
-  };
 
   return (
     <div className="border border-slate-300 rounded-2xl p-6 sm:p-12 flex flex-col items-center justify-center min-h-[420px] bg-white">
@@ -413,34 +408,6 @@ export const QrCameraScanner: React.FC<QrCameraScannerProps> = ({
         />
       </div>
 
-      {/* Simulator helper for testing without physical extinguisher tag */}
-      <div className="mt-4 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-center gap-2">
-        <span className="text-[11px] text-slate-400 flex items-center gap-1">
-          <Sparkles className="w-3 h-3 text-amber-500" />
-          Testar leitura rápida:
-        </span>
-        <button
-          type="button"
-          onClick={() => handleSimulate('SENAI-EXT-009555')}
-          className="px-2.5 py-1 text-[11px] bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-md font-mono"
-        >
-          009555 (Água 10L - Térreo)
-        </button>
-        <button
-          type="button"
-          onClick={() => handleSimulate('SENAI-EXT-045621')}
-          className="px-2.5 py-1 text-[11px] bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-md font-mono"
-        >
-          045621 (ABC 6kg - Térreo)
-        </button>
-        <button
-          type="button"
-          onClick={() => handleSimulate('SENAI-EXT-009640')}
-          className="px-2.5 py-1 text-[11px] bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-md font-mono"
-        >
-          009640 (CO2 6kg - 1º andar)
-        </button>
-      </div>
 
       {/* Bottom Action buttons matching MacBook Air - 34 */}
       <div className="flex items-center gap-4 mt-8">

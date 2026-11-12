@@ -5,7 +5,7 @@
 
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Extinguisher, BrigadeMember, UserProfile } from '../types/brigada';
+import { Extinguisher, BrigadeMember, UserProfile, ActivityLogEntry } from '../types/brigada';
 import { generateReportMetrics } from './brigadaLogic';
 
 export interface PdfReportOptions {
@@ -298,6 +298,218 @@ export function generatePdfReport({
     return { success: true, filename };
   } catch (error) {
     console.error('Erro ao gerar relatório PDF:', error);
+    return { success: false, filename: '' };
+  }
+}
+
+export interface ActivityHistoryPdfOptions {
+  user: UserProfile;
+  logs: ActivityLogEntry[];
+  categoryFilter?: string;
+  userFilter?: string;
+}
+
+export function generateActivityHistoryPdf({
+  user,
+  logs,
+  categoryFilter = 'Todos',
+  userFilter = 'Todos',
+}: ActivityHistoryPdfOptions): { success: boolean; filename: string } {
+  try {
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4',
+    });
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const emitDate = new Date().toLocaleDateString('pt-BR');
+    const emitTime = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+    // 1. Header Banner (SENAI Red: #e30613)
+    doc.setFillColor(227, 6, 19);
+    doc.rect(0, 0, pageWidth, 24, 'F');
+
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text('SENAI', 14, 12);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.text('Serviço Nacional de Aprendizagem Industrial', 14, 18);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.text('HISTÓRICO DE ATIVIDADES & AUDITORIA', pageWidth - 14, 15, { align: 'right' });
+
+    // 2. Report Sub-header & Title
+    let currentY = 32;
+    doc.setTextColor(30, 41, 59);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.text('REGISTRO CRONOLÓGICO DE OPERAÇÕES DO SISTEMA', 14, currentY);
+
+    currentY += 5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(
+      'Rastreabilidade de vistorias, alterações em extintores, equipe da brigada e acessos | Norma NR-23',
+      14,
+      currentY
+    );
+
+    // 3. Metadata Box
+    currentY += 5;
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(14, currentY, pageWidth - 28, 16, 2, 2, 'FD');
+
+    doc.setFontSize(8.5);
+    doc.setTextColor(51, 65, 85);
+
+    // Metadata items
+    doc.setFont('helvetica', 'bold');
+    doc.text('Data de Emissão:', 18, currentY + 6);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${emitDate} às ${emitTime}`, 46, currentY + 6);
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Emitido por:', 18, currentY + 12);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${user.name} (${user.role})`, 46, currentY + 12);
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Filtro Categoria:', 120, currentY + 6);
+    doc.setFont('helvetica', 'normal');
+    doc.text(categoryFilter, 150, currentY + 6);
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Filtro Responsável:', 120, currentY + 12);
+    doc.setFont('helvetica', 'normal');
+    doc.text(userFilter, 150, currentY + 12);
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Total de Registros:', 220, currentY + 6);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${logs.length} registro(s)`, 250, currentY + 6);
+
+    // 4. AutoTable for Activity Logs
+    currentY += 21;
+    const tableData = logs.map((l, index) => [
+      String(index + 1),
+      l.formattedDateTime || '-',
+      `${l.userName}\n(${l.userRole})`,
+      l.category,
+      l.description,
+      l.targetFloor || '-',
+      l.targetCode ? `#${l.targetCode}` : '-',
+    ]);
+
+    autoTable(doc, {
+      startY: currentY,
+      head: [
+        [
+          'Item',
+          'Data / Horário',
+          'Responsável',
+          'Categoria',
+          'Descrição da Atividade',
+          'Local',
+          'Extintor',
+        ],
+      ],
+      body: tableData,
+      theme: 'grid',
+      headStyles: {
+        fillColor: [227, 6, 19],
+        textColor: 255,
+        fontStyle: 'bold',
+        fontSize: 8.5,
+        halign: 'center',
+      },
+      bodyStyles: {
+        fontSize: 8,
+        textColor: [30, 41, 59],
+        valign: 'middle',
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252],
+      },
+      columnStyles: {
+        0: { cellWidth: 12, halign: 'center' },
+        1: { cellWidth: 38 },
+        2: { cellWidth: 38 },
+        3: { cellWidth: 26, halign: 'center' },
+        4: { cellWidth: 'auto' },
+        5: { cellWidth: 28, halign: 'center' },
+        6: { cellWidth: 22, halign: 'center', fontStyle: 'bold' },
+      },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 3) {
+          const val = String(data.cell.raw);
+          if (val === 'Extintores' || val === 'Inspeções') {
+            data.cell.styles.textColor = [4, 120, 87];
+            data.cell.styles.fontStyle = 'bold';
+          } else if (val === 'Brigada' || val === 'Usuários') {
+            data.cell.styles.textColor = [37, 99, 235];
+            data.cell.styles.fontStyle = 'bold';
+          }
+        }
+      },
+      margin: { left: 14, right: 14 },
+    });
+
+    // 5. Footer & Signature
+    const lastY = (doc as any).lastAutoTable?.finalY || currentY + 60;
+    const availableSpace = doc.internal.pageSize.getHeight() - lastY;
+    let signY = lastY + 12;
+
+    if (availableSpace < 35) {
+      doc.addPage();
+      signY = 25;
+    }
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(
+      'Documento de auditoria gerado pelo Sistema Brigada & Extintores SENAI para fiscalização e rastreabilidade legal.',
+      14,
+      signY
+    );
+
+    // Save & Trigger Download
+    const sanitizedDate = emitDate.replace(/[/\\?%*:|"<>]/g, '-');
+    const filename = `Historico_Atividades_SENAI_${sanitizedDate}.pdf`;
+
+    if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+      try {
+        const pdfBlob = doc.output('blob');
+        const blobUrl = window.URL.createObjectURL(pdfBlob);
+        const downloadLink = document.createElement('a');
+        downloadLink.href = blobUrl;
+        downloadLink.download = filename;
+        downloadLink.rel = 'noopener';
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        setTimeout(() => {
+          try {
+            document.body.removeChild(downloadLink);
+            window.URL.revokeObjectURL(blobUrl);
+          } catch {
+            // Ignore clean up errors
+          }
+        }, 1500);
+      } catch {
+        doc.save(filename);
+      }
+    }
+
+    return { success: true, filename };
+  } catch (error) {
+    console.error('Erro ao gerar PDF do histórico:', error);
     return { success: false, filename: '' };
   }
 }
