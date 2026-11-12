@@ -42,28 +42,48 @@ interface ExtinguishersViewProps {
 
 const FLOORS = [
   'Todos',
-  'Térreo',
+  'Térreo - Recepção e Portaria',
+  'Térreo - Cantina e Oficinas',
   '1º andar',
   '2º andar',
   '3º andar',
   '4º andar',
   '5º andar',
   '6º andar',
+  'Geral - Toda a unidade SENAI',
 ] as const;
 
 type FloorFilterType = (typeof FLOORS)[number];
 
 const FORM_FLOORS = [
-  'Térreo',
+  'Térreo - Recepção e Portaria',
+  'Térreo - Cantina e Oficinas',
   '1º andar',
   '2º andar',
   '3º andar',
   '4º andar',
   '5º andar',
   '6º andar',
+  'Geral - Toda a unidade SENAI',
 ] as const;
 
 type FormFloorType = (typeof FORM_FLOORS)[number];
+
+function toFormFloor(floor: string): FormFloorType {
+  if (FORM_FLOORS.includes(floor as FormFloorType)) {
+    return floor as FormFloorType;
+  }
+  if (floor === 'Térreo') return 'Térreo - Recepção e Portaria';
+  return '1º andar';
+}
+
+function toFloorFilter(floor: string): FloorFilterType {
+  if (FLOORS.includes(floor as FloorFilterType)) {
+    return floor as FloorFilterType;
+  }
+  if (floor === 'Térreo') return 'Térreo - Recepção e Portaria';
+  return 'Todos';
+}
 
 /**
  * Calculates well-spaced extinguisher pin positions strictly bounded inside
@@ -161,13 +181,30 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
   const [formStatus, setFormStatus] = useState<ExtinguisherStatus>('Em dia');
   const [formPurchaseDate, setFormPurchaseDate] = useState('');
   const [formNotes, setFormNotes] = useState('');
-  const [formFloor, setFormFloor] = useState<FormFloorType>('Térreo');
+  const [formFloor, setFormFloor] = useState<FormFloorType>('Térreo - Recepção e Portaria');
 
   const filteredExtinguishers = useMemo(() => {
     if (selectedFloor === 'Todos') {
       return extinguishers;
     }
-    return extinguishers.filter((e) => e.floor === selectedFloor);
+    return extinguishers.filter((e) => {
+      if (e.floor === selectedFloor) return true;
+      if (
+        selectedFloor === 'Térreo - Recepção e Portaria' &&
+        (e.floor === 'Térreo' || e.floor === 'Térreo - Recepção e Portaria')
+      ) {
+        const loc = (e.location || '').toLowerCase();
+        return loc.includes('portaria') || loc.includes('recepção') || loc.includes('saguão') || loc.includes('quadra');
+      }
+      if (
+        selectedFloor === 'Térreo - Cantina e Oficinas' &&
+        (e.floor === 'Térreo' || e.floor === 'Térreo - Cantina e Oficinas')
+      ) {
+        const loc = (e.location || '').toLowerCase();
+        return !(loc.includes('portaria') || loc.includes('recepção') || loc.includes('saguão') || loc.includes('quadra'));
+      }
+      return false;
+    });
   }, [extinguishers, selectedFloor]);
 
   const pinPositions = useMemo(() => {
@@ -183,7 +220,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
     setFormStatus('Em dia');
     setFormPurchaseDate('');
     setFormNotes('');
-    setFormFloor(selectedFloor === 'Todos' ? 'Térreo' : selectedFloor);
+    setFormFloor(selectedFloor === 'Todos' ? 'Térreo - Recepção e Portaria' : (selectedFloor as FormFloorType));
     setQrScanBanner(null);
     setQrScanError(null);
     setViewMode('create');
@@ -198,7 +235,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
     setFormStatus(ext.status);
     setFormPurchaseDate(ext.purchaseDate || '10/01/2024');
     setFormNotes(ext.notes || '');
-    setFormFloor(ext.floor);
+    setFormFloor(toFormFloor(ext.floor));
     setViewMode('edit');
   };
 
@@ -274,7 +311,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
     );
 
     if (match) {
-      setSelectedFloor(match.floor);
+      setSelectedFloor(toFloorFilter(match.floor));
       setSelectedExtinguisherForDetails(match);
       setViewMode('list');
       setQrScanBanner(

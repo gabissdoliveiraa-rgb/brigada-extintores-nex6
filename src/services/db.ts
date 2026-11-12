@@ -29,7 +29,6 @@ import {
   deleteDoc,
   onSnapshot,
   writeBatch,
-  getDocs,
   Unsubscribe,
 } from 'firebase/firestore';
 
@@ -91,6 +90,29 @@ function sanitizeDocId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_\-]/g, '_');
 }
 
+/**
+ * Recursively cleans an object so that no property has the value `undefined`.
+ * Firestore throws a runtime error if any property value is `undefined`.
+ */
+export function cleanForFirestore<T>(data: T): T {
+  if (data === null || data === undefined) {
+    return data;
+  }
+  if (Array.isArray(data)) {
+    return data.map((item) => cleanForFirestore(item)) as unknown as T;
+  }
+  if (typeof data === 'object') {
+    const clean: Record<string, any> = {};
+    for (const [key, value] of Object.entries(data as Record<string, any>)) {
+      if (value !== undefined) {
+        clean[key] = cleanForFirestore(value);
+      }
+    }
+    return clean as T;
+  }
+  return data;
+}
+
 // --- USERS & EMAILS CRUD ---
 export const dbUsers = {
   getAll: (): RegisteredUser[] => {
@@ -117,7 +139,7 @@ export const dbUsers = {
         const batch = writeBatch(db);
         users.forEach((u) => {
           const ref = doc(db, 'users', sanitizeDocId(u.id));
-          batch.set(ref, u);
+          batch.set(ref, cleanForFirestore(u));
         });
         batch.commit().catch((err) => console.warn('Erro ao salvar usuários no Firestore:', err));
       } catch (err) {
@@ -139,7 +161,7 @@ export const dbUsers = {
     // Sync to Firestore
     if (db && typeof window !== 'undefined') {
       try {
-        setDoc(doc(db, 'users', sanitizeDocId(newUser.id)), newUser).catch((err) =>
+        setDoc(doc(db, 'users', sanitizeDocId(newUser.id)), cleanForFirestore(newUser)).catch((err) =>
           console.warn('Erro ao gravar usuário no Firestore:', err)
         );
       } catch (err) {
@@ -157,7 +179,8 @@ export const dbUsers = {
 
     if (db && typeof window !== 'undefined') {
       try {
-        setDoc(doc(db, 'users', sanitizeDocId(user.id)), user).catch((err) =>
+        const payload = cleanForFirestore(user);
+        setDoc(doc(db, 'users', sanitizeDocId(user.id)), payload).catch((err) =>
           console.warn('Erro ao atualizar usuário no Firestore:', err)
         );
       } catch (err) {
@@ -208,7 +231,7 @@ export const dbUsers = {
 export const dbExtinguishers = {
   getAll: (): Extinguisher[] => {
     const list = loadFromStorage<Extinguisher[]>(KEYS.EXTINGUISHERS, INITIAL_EXTINGUISHERS);
-    if (!list || list.length < INITIAL_EXTINGUISHERS.length) {
+    if (!list) {
       saveToStorage(KEYS.EXTINGUISHERS, INITIAL_EXTINGUISHERS);
       return INITIAL_EXTINGUISHERS;
     }
@@ -229,7 +252,7 @@ export const dbExtinguishers = {
           const chunk = exts.slice(i, i + 400);
           const batch = writeBatch(db);
           chunk.forEach((ext) => {
-            batch.set(doc(db, 'extinguishers', sanitizeDocId(ext.id)), ext);
+            batch.set(doc(db, 'extinguishers', sanitizeDocId(ext.id)), cleanForFirestore(ext));
           });
           batch.commit().catch((err) => console.warn('Erro ao sincronizar extintores no Firestore:', err));
         }
@@ -250,7 +273,7 @@ export const dbExtinguishers = {
 
     if (db && typeof window !== 'undefined') {
       try {
-        setDoc(doc(db, 'extinguishers', sanitizeDocId(extWithQr.id)), extWithQr).catch((err) =>
+        setDoc(doc(db, 'extinguishers', sanitizeDocId(extWithQr.id)), cleanForFirestore(extWithQr)).catch((err) =>
           console.warn('Erro ao criar extintor no Firestore:', err)
         );
       } catch (err) {
@@ -273,7 +296,7 @@ export const dbExtinguishers = {
 
     if (db && typeof window !== 'undefined') {
       try {
-        setDoc(doc(db, 'extinguishers', sanitizeDocId(ext.id)), ext).catch((err) =>
+        setDoc(doc(db, 'extinguishers', sanitizeDocId(ext.id)), cleanForFirestore(ext)).catch((err) =>
           console.warn('Erro ao atualizar extintor no Firestore:', err)
         );
       } catch (err) {
@@ -318,7 +341,7 @@ export const dbInspections = {
           const chunk = inspections.slice(i, i + 400);
           const batch = writeBatch(db);
           chunk.forEach((insp) => {
-            batch.set(doc(db, 'inspections', sanitizeDocId(insp.id)), insp);
+            batch.set(doc(db, 'inspections', sanitizeDocId(insp.id)), cleanForFirestore(insp));
           });
           batch.commit().catch((err) => console.warn('Erro ao sincronizar inspeções:', err));
         }
@@ -335,7 +358,7 @@ export const dbInspections = {
 
     if (db && typeof window !== 'undefined') {
       try {
-        setDoc(doc(db, 'inspections', sanitizeDocId(insp.id)), insp).catch((err) =>
+        setDoc(doc(db, 'inspections', sanitizeDocId(insp.id)), cleanForFirestore(insp)).catch((err) =>
           console.warn('Erro ao atualizar inspeção no Firestore:', err)
         );
       } catch (err) {
@@ -349,7 +372,7 @@ export const dbInspections = {
 export const dbBrigade = {
   getAll: (): BrigadeMember[] => {
     const list = loadFromStorage<BrigadeMember[]>(KEYS.MEMBERS, INITIAL_BRIGADE_MEMBERS);
-    if (!list || list.length < INITIAL_BRIGADE_MEMBERS.length) {
+    if (!list) {
       saveToStorage(KEYS.MEMBERS, INITIAL_BRIGADE_MEMBERS);
       return INITIAL_BRIGADE_MEMBERS;
     }
@@ -367,7 +390,7 @@ export const dbBrigade = {
       try {
         const batch = writeBatch(db);
         members.forEach((m) => {
-          batch.set(doc(db, 'brigade_members', sanitizeDocId(m.id)), m);
+          batch.set(doc(db, 'brigade_members', sanitizeDocId(m.id)), cleanForFirestore(m));
         });
         batch.commit().catch((err) => console.warn('Erro ao sincronizar brigadistas:', err));
       } catch (err) {
@@ -383,7 +406,7 @@ export const dbBrigade = {
 
     if (db && typeof window !== 'undefined') {
       try {
-        setDoc(doc(db, 'brigade_members', sanitizeDocId(member.id)), member).catch((err) =>
+        setDoc(doc(db, 'brigade_members', sanitizeDocId(member.id)), cleanForFirestore(member)).catch((err) =>
           console.warn('Erro ao criar brigadista no Firestore:', err)
         );
       } catch (err) {
@@ -401,7 +424,7 @@ export const dbBrigade = {
 
     if (db && typeof window !== 'undefined') {
       try {
-        setDoc(doc(db, 'brigade_members', sanitizeDocId(member.id)), member).catch((err) =>
+        setDoc(doc(db, 'brigade_members', sanitizeDocId(member.id)), cleanForFirestore(member)).catch((err) =>
           console.warn('Erro ao atualizar brigadista no Firestore:', err)
         );
       } catch (err) {
@@ -444,7 +467,7 @@ export const dbNotices = {
       try {
         const batch = writeBatch(db);
         notices.forEach((n) => {
-          batch.set(doc(db, 'notices', sanitizeDocId(n.id)), n);
+          batch.set(doc(db, 'notices', sanitizeDocId(n.id)), cleanForFirestore(n));
         });
         batch.commit().catch((err) => console.warn('Erro ao sincronizar avisos:', err));
       } catch (err) {
@@ -471,7 +494,7 @@ export const dbActivityLogs = {
       try {
         const batch = writeBatch(db);
         logs.slice(0, 100).forEach((l) => {
-          batch.set(doc(db, 'activity_logs', sanitizeDocId(l.id)), l);
+          batch.set(doc(db, 'activity_logs', sanitizeDocId(l.id)), cleanForFirestore(l));
         });
         batch.commit().catch((err) => console.warn('Erro ao sincronizar logs:', err));
       } catch (err) {
@@ -504,7 +527,7 @@ export const dbActivityLogs = {
 
     if (db && typeof window !== 'undefined') {
       try {
-        setDoc(doc(db, 'activity_logs', sanitizeDocId(newEntry.id)), newEntry).catch((err) =>
+        setDoc(doc(db, 'activity_logs', sanitizeDocId(newEntry.id)), cleanForFirestore(newEntry)).catch((err) =>
           console.warn('Erro ao gravar log no Firestore:', err)
         );
       } catch (err) {
@@ -626,7 +649,6 @@ export function initFirestoreRealtimeSync(): () => void {
       extCol,
       (snapshot) => {
         if (snapshot.empty) {
-          // Auto-seed Firestore from official initial extinguishers
           console.info('Firestore vazio: populando 123 extintores oficiais do SENAI...');
           dbExtinguishers.saveAll(INITIAL_EXTINGUISHERS);
         } else {
@@ -719,7 +741,10 @@ export function initFirestoreRealtimeSync(): () => void {
     const unsubLogs = onSnapshot(
       logsCol,
       (snapshot) => {
-        if (!snapshot.empty) {
+        if (snapshot.empty) {
+          // Auto-seed initial activity logs if collection is empty
+          dbActivityLogs.saveAll(INITIAL_ACTIVITY_LOGS);
+        } else {
           const remoteList: ActivityLogEntry[] = [];
           snapshot.forEach((d) => remoteList.push(d.data() as ActivityLogEntry));
           // Sort newest first

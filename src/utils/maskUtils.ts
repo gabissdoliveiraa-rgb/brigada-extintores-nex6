@@ -127,12 +127,12 @@ export function validateName(name: string): { valid: boolean; error?: string } {
 
 export const SENAI_SECTOR_OPTIONS = [
   'Térreo - Recepção e Portaria',
-  'Térreo - Manutenção e Oficinas',
-  '1º andar - Administração e Coordenação',
-  '2º andar - Laboratórios de TI e Informática',
-  '3º andar - Eletroeletrônica e Automação',
-  '4º andar - Usinagem e Mecânica',
-  '5º andar - Soldagem e Caldeiraria',
-  '6º andar - Auditório e Biblioteca',
+  'Térreo - Cantina e Oficinas',
+  '1º andar',
+  '2º andar',
+  '3º andar',
+  '4º andar',
+  '5º andar',
+  '6º andar',
   'Geral - Toda a unidade SENAI',
 ];

@@ -81,7 +81,35 @@ export function filterExtinguishersByFloor(
   floor: string
 ): Extinguisher[] {
   if (!floor || floor === 'Todos') return extinguishers;
-  return extinguishers.filter((e) => e.floor === floor);
+  return extinguishers.filter((e) => {
+    if (e.floor === floor) return true;
+    if (floor === 'Térreo' && e.floor.startsWith('Térreo')) return true;
+    if (
+      floor === 'Térreo - Recepção e Portaria' &&
+      (e.floor === 'Térreo' || e.floor === 'Térreo - Recepção e Portaria')
+    ) {
+      const loc = (e.location || '').toLowerCase();
+      return (
+        loc.includes('portaria') ||
+        loc.includes('recepção') ||
+        loc.includes('saguão') ||
+        loc.includes('quadra')
+      );
+    }
+    if (
+      floor === 'Térreo - Cantina e Oficinas' &&
+      (e.floor === 'Térreo' || e.floor === 'Térreo - Cantina e Oficinas')
+    ) {
+      const loc = (e.location || '').toLowerCase();
+      return !(
+        loc.includes('portaria') ||
+        loc.includes('recepção') ||
+        loc.includes('saguão') ||
+        loc.includes('quadra')
+      );
+    }
+    return false;
+  });
 }
 
 /**
@@ -92,7 +120,35 @@ export function filterInspectionsByFloor(
   floor: string
 ): Inspection[] {
   if (!floor || floor === 'Todos') return inspections;
-  return inspections.filter((i) => i.floor === floor);
+  return inspections.filter((i) => {
+    if (i.floor === floor) return true;
+    if (floor === 'Térreo' && i.floor.startsWith('Térreo')) return true;
+    if (
+      floor === 'Térreo - Recepção e Portaria' &&
+      (i.floor === 'Térreo' || i.floor === 'Térreo - Recepção e Portaria')
+    ) {
+      const loc = (i.location || '').toLowerCase();
+      return (
+        loc.includes('portaria') ||
+        loc.includes('recepção') ||
+        loc.includes('saguão') ||
+        loc.includes('quadra')
+      );
+    }
+    if (
+      floor === 'Térreo - Cantina e Oficinas' &&
+      (i.floor === 'Térreo' || i.floor === 'Térreo - Cantina e Oficinas')
+    ) {
+      const loc = (i.location || '').toLowerCase();
+      return !(
+        loc.includes('portaria') ||
+        loc.includes('recepção') ||
+        loc.includes('saguão') ||
+        loc.includes('quadra')
+      );
+    }
+    return false;
+  });
 }
 
 /**

@@ -117,7 +117,20 @@ export default function App() {
 
     const unsubExt = dbExtinguishers.subscribe((data) => setExtinguishers(data));
     const unsubMembers = dbBrigade.subscribe((data) => setMembers(data));
-    const unsubUsers = dbUsers.subscribe((data) => setUsers(data));
+    const unsubUsers = dbUsers.subscribe((data) => {
+      setUsers(data);
+      // Synchronize active session user when edited from another device
+      setUser((current) => {
+        if (!current) return null;
+        const remoteUser = data.find((u) => u.id === current.id);
+        if (remoteUser) {
+          const merged = { ...current, ...remoteUser };
+          localStorage.setItem('senai_brigada_user', JSON.stringify(merged));
+          return merged;
+        }
+        return current;
+      });
+    });
     const unsubInsp = dbInspections.subscribe((data) => setInspections(data));
     const unsubNotices = dbNotices.subscribe((data) => setNotices(data));
     const unsubLogs = dbActivityLogs.subscribe((data) => setActivityLogs(data));
@@ -189,7 +202,9 @@ export default function App() {
     dbUsers.update(updatedUser);
     setUsers(dbUsers.getAll());
     if (user && user.id === updatedUser.id) {
-      setUser(updatedUser);
+      const merged = { ...user, ...updatedUser };
+      setUser(merged);
+      localStorage.setItem('senai_brigada_user', JSON.stringify(merged));
     }
     showToast(`Usuário ${updatedUser.name} atualizado no banco.`);
     if (user) {

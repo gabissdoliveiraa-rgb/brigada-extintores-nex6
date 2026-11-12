@@ -28,23 +28,27 @@ interface InspectionsViewProps {
 }
 
 const FLOORS = [
-  'Térreo',
+  'Térreo - Recepção e Portaria',
+  'Térreo - Cantina e Oficinas',
   '1º andar',
   '2º andar',
   '3º andar',
   '4º andar',
   '5º andar',
   '6º andar',
+  'Geral - Toda a unidade SENAI',
 ] as const;
+
+type InspectionFloorType = (typeof FLOORS)[number];
 
 export const InspectionsView: React.FC<InspectionsViewProps> = ({
   user,
   inspections,
   onUpdateInspection,
 }) => {
-  const [selectedFloor, setSelectedFloor] = useState<
-    'Térreo' | '1º andar' | '2º andar' | '3º andar' | '4º andar' | '5º andar' | '6º andar'
-  >('Térreo');
+  const [selectedFloor, setSelectedFloor] = useState<InspectionFloorType>(
+    'Térreo - Recepção e Portaria'
+  );
 
   const [activeInspection, setActiveInspection] = useState<Inspection | null>(
     null
@@ -63,9 +67,24 @@ export const InspectionsView: React.FC<InspectionsViewProps> = ({
   const [editValidityDate, setEditValidityDate] = useState('');
   const [editNextInspectionDate, setEditNextInspectionDate] = useState('');
 
-  const filteredInspections = inspections.filter(
-    (insp) => insp.floor === selectedFloor
-  );
+  const filteredInspections = inspections.filter((insp) => {
+    if (insp.floor === selectedFloor) return true;
+    if (
+      selectedFloor === 'Térreo - Recepção e Portaria' &&
+      (insp.floor === 'Térreo' || insp.floor === 'Térreo - Recepção e Portaria')
+    ) {
+      const loc = (insp.location || '').toLowerCase();
+      return loc.includes('portaria') || loc.includes('recepção') || loc.includes('saguão') || loc.includes('quadra');
+    }
+    if (
+      selectedFloor === 'Térreo - Cantina e Oficinas' &&
+      (insp.floor === 'Térreo' || insp.floor === 'Térreo - Cantina e Oficinas')
+    ) {
+      const loc = (insp.location || '').toLowerCase();
+      return !(loc.includes('portaria') || loc.includes('recepção') || loc.includes('saguão') || loc.includes('quadra'));
+    }
+    return false;
+  });
 
   const handleStartEdit = (insp: Inspection) => {
     setActiveInspection(insp);

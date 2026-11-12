@@ -33,6 +33,20 @@ export interface FullDatabaseBackup {
   activityLogs?: ActivityLogEntry[];
 }
 
+export const SENAI_FLOORS = [
+  'Térreo - Recepção e Portaria',
+  'Térreo - Cantina e Oficinas',
+  '1º andar',
+  '2º andar',
+  '3º andar',
+  '4º andar',
+  '5º andar',
+  '6º andar',
+  'Geral - Toda a unidade SENAI',
+] as const;
+
+export type FloorType = (typeof SENAI_FLOORS)[number] | string;
+
 export type ExtinguisherType = 'Pó Químico ABC' | 'CO2' | 'Água' | 'Espuma Mecânica';
 export type ExtinguisherStatus = 'Em dia' | 'Atenção' | 'Vencido';
 
@@ -41,7 +55,7 @@ export interface Extinguisher {
   code: string;
   type: ExtinguisherType;
   location: string;
-  floor: 'Térreo' | '1º andar' | '2º andar' | '3º andar' | '4º andar' | '5º andar' | '6º andar';
+  floor: FloorType;
   capacity: string;
   status: ExtinguisherStatus;
   purchaseDate?: string;
@@ -61,7 +75,7 @@ export interface Inspection {
   date: string;
   responsible: string;
   status: ExtinguisherStatus;
-  floor: 'Térreo' | '1º andar' | '2º andar' | '3º andar' | '4º andar' | '5º andar' | '6º andar';
+  floor: FloorType;
   location: string;
   capacity: string;
   validityDate: string;
@@ -78,7 +92,7 @@ export interface BrigadeMember {
   functionDescription: string;
   phone: string;
   email: string;
-  responsibleFloor: 'Térreo' | '1º andar' | '2º andar' | '3º andar' | '4º andar' | '5º andar' | '6º andar' | 'Geral';
+  responsibleFloor: FloorType;
   trainingStatus: 'Em dia' | 'Vencido';
   trainingExpirationDate?: string;
   avatarUrl?: string;

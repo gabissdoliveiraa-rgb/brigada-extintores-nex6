@@ -339,14 +339,15 @@ export const BrigadeView: React.FC<BrigadeViewProps> = ({
                       }
                       className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                     >
-                      <option value="Térreo">Térreo</option>
+                      <option value="Térreo - Recepção e Portaria">Térreo - Recepção e Portaria</option>
+                      <option value="Térreo - Cantina e Oficinas">Térreo - Cantina e Oficinas</option>
                       <option value="1º andar">1º andar</option>
                       <option value="2º andar">2º andar</option>
                       <option value="3º andar">3º andar</option>
                       <option value="4º andar">4º andar</option>
                       <option value="5º andar">5º andar</option>
                       <option value="6º andar">6º andar</option>
-                      <option value="Geral">Geral</option>
+                      <option value="Geral - Toda a unidade SENAI">Geral - Toda a unidade SENAI</option>
                     </select>
                   </div>
                 </div>
@@ -676,14 +677,15 @@ export const BrigadeView: React.FC<BrigadeViewProps> = ({
                       }
                       className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-red-500"
                     >
-                      <option value="Térreo">Térreo</option>
+                      <option value="Térreo - Recepção e Portaria">Térreo - Recepção e Portaria</option>
+                      <option value="Térreo - Cantina e Oficinas">Térreo - Cantina e Oficinas</option>
                       <option value="1º andar">1º andar</option>
                       <option value="2º andar">2º andar</option>
                       <option value="3º andar">3º andar</option>
                       <option value="4º andar">4º andar</option>
                       <option value="5º andar">5º andar</option>
                       <option value="6º andar">6º andar</option>
-                      <option value="Geral">Geral</option>
+                      <option value="Geral - Toda a unidade SENAI">Geral - Toda a unidade SENAI</option>
                     </select>
                   </div>
 
