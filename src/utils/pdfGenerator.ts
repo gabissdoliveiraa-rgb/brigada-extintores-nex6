@@ -5,12 +5,19 @@
 
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { Extinguisher, BrigadeMember, UserProfile, ActivityLogEntry } from '../types/brigada';
-import { generateReportMetrics } from './brigadaLogic';
+import {
+  Extinguisher,
+  BrigadeMember,
+  UserProfile,
+  ActivityLogEntry,
+  Inspection,
+} from '../types/brigada';
+import { filterDataByReportPeriod } from './brigadaLogic';
 
 export interface PdfReportOptions {
   user: UserProfile;
   extinguishers: Extinguisher[];
+  inspections?: Inspection[];
   members: BrigadeMember[];
   period: 'Diário' | 'Semanal' | 'Mensal';
   selectedDate: string;
@@ -19,6 +26,7 @@ export interface PdfReportOptions {
 export function generatePdfReport({
   user,
   extinguishers,
+  inspections = [],
   members,
   period,
   selectedDate,
@@ -30,7 +38,8 @@ export function generatePdfReport({
       format: 'a4',
     });
 
-    const metrics = generateReportMetrics(extinguishers);
+    const dataset = filterDataByReportPeriod(extinguishers, inspections, period, selectedDate);
+    const metrics = dataset.metrics;
     const pageWidth = doc.internal.pageSize.getWidth();
 
     // 1. Header Banner (SENAI Red: #e30613)
@@ -57,12 +66,7 @@ export function generatePdfReport({
         ? 'RELATÓRIO SEMANAL DE CONFORMIDADE PREVENTIVA'
         : 'RELATÓRIO MENSAL DE AUDITORIA GERAL (NBR 12962)';
 
-    const subtitle =
-      period === 'Diário'
-        ? 'Setor de Segurança e Saúde no Trabalho (SST) - SENAI-SP | Rotina Diária & Vistorias Imediatas'
-        : period === 'Semanal'
-        ? 'Setor de Segurança e Saúde no Trabalho (SST) - SENAI-SP | Acompanhamento Semanal por Pavimento'
-        : 'Setor de Segurança e Saúde no Trabalho (SST) - SENAI-SP | Auditoria Mensal dos 123 Extintores & Brigada';
+    const subtitle = `Setor SST - SENAI-SP | ${dataset.scopeDescription}`;
 
     // 2. Report Sub-header & Title
     let currentY = 32;
@@ -73,7 +77,7 @@ export function generatePdfReport({
 
     currentY += 6;
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
+    doc.setFontSize(8.5);
     doc.setTextColor(100, 116, 139);
     doc.text(subtitle, 14, currentY);
 
@@ -81,39 +85,49 @@ export function generatePdfReport({
     currentY += 6;
     doc.setFillColor(248, 250, 252);
     doc.setDrawColor(226, 232, 240);
-    doc.roundedRect(14, currentY, pageWidth - 28, 20, 2, 2, 'FD');
+    doc.roundedRect(14, currentY, pageWidth - 28, 22, 2, 2, 'FD');
 
-    doc.setFontSize(9);
+    doc.setFontSize(8.5);
     doc.setTextColor(51, 65, 85);
 
     // Left column
     doc.setFont('helvetica', 'bold');
-    doc.text('Data de Emissão:', 18, currentY + 6);
+    doc.text('Data Base:', 18, currentY + 6);
     doc.setFont('helvetica', 'normal');
-    doc.text(selectedDate, 48, currentY + 6);
+    doc.text(selectedDate, 44, currentY + 6);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('Periodicidade:', 18, currentY + 14);
+    doc.text('Recorte:', 18, currentY + 12);
     doc.setFont('helvetica', 'normal');
-    doc.text(period, 48, currentY + 14);
+    doc.text(`${period} (${dataset.periodRangeLabel})`, 44, currentY + 12);
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Brigadistas:', 18, currentY + 18);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${members.length} ativos na unidade`, 44, currentY + 18);
 
     // Right column
     doc.setFont('helvetica', 'bold');
-    doc.text('Responsável Técnico:', 100, currentY + 6);
+    doc.text('Responsável:', 105, currentY + 6);
     doc.setFont('helvetica', 'normal');
-    doc.text(`${user.name} (${user.role})`, 138, currentY + 6);
+    doc.text(`${user.name} (${user.role})`, 132, currentY + 6);
 
     doc.setFont('helvetica', 'bold');
-    doc.text('E-mail de Contato:', 100, currentY + 14);
+    doc.text('E-mail:', 105, currentY + 12);
     doc.setFont('helvetica', 'normal');
-    doc.text(user.email, 138, currentY + 14);
+    doc.text(user.email, 132, currentY + 12);
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Vistorias:', 105, currentY + 18);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${dataset.inspections.length} no período`, 132, currentY + 18);
 
     // 4. KPI Cards
-    currentY += 26;
+    currentY += 28;
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(30, 41, 59);
-    doc.text(`1. Indicadores de Prontidão (${period})`, 14, currentY);
+    doc.text(`1. Indicadores de Prontidão (${period} - ${dataset.periodRangeLabel})`, 14, currentY);
 
     currentY += 4;
     const cardWidth = (pageWidth - 28 - 9) / 4;
@@ -124,7 +138,7 @@ export function generatePdfReport({
     doc.roundedRect(14, currentY, cardWidth, cardHeight, 1.5, 1.5, 'F');
     doc.setFontSize(8);
     doc.setTextColor(100, 116, 139);
-    doc.text('TOTAL AUDITADO', 14 + cardWidth / 2, currentY + 5, { align: 'center' });
+    doc.text('TOTAL NO PERÍODO', 14 + cardWidth / 2, currentY + 5, { align: 'center' });
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(15, 23, 42);
@@ -149,7 +163,7 @@ export function generatePdfReport({
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(180, 83, 9);
-    doc.text('A VENCER (ALERTA)', card3X + cardWidth / 2, currentY + 5, { align: 'center' });
+    doc.text('A VENCER (ATENÇÃO)', card3X + cardWidth / 2, currentY + 5, { align: 'center' });
     doc.setFontSize(12);
     doc.setFont('helvetica', 'bold');
     doc.text(`${metrics.expiring}`, card3X + cardWidth / 2, currentY + 12, { align: 'center' });
@@ -171,39 +185,28 @@ export function generatePdfReport({
     // 5. Equipment Inventory Table tailored by Period
     const sectionTitle =
       period === 'Diário'
-        ? '2. Vistorias do Dia & Equipamentos com Prioridade de Ação'
+        ? `2. Extintores Prioritários & Rotina Diária (${dataset.extinguishers.length} itens)`
         : period === 'Semanal'
-        ? '2. Acompanhamento Semanal de Extintores e Prazos Curtos'
-        : '2. Inventário Geral dos 123 Extintores da Planta SENAI (NBR 12962)';
+        ? `2. Acompanhamento Semanal de Extintores (${dataset.extinguishers.length} itens)`
+        : `2. Inventário Geral da Planta SENAI (${dataset.extinguishers.length} extintores)`;
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(11);
     doc.setTextColor(30, 41, 59);
     doc.text(sectionTitle, 14, currentY);
 
-    // Filter displayed extinguishers based on period scope:
-    // Diário: prioritize items requiring immediate check or attention, followed by daily routine
-    // Semanal: prioritize items needing weekly inspection or expiring soon
-    // Mensal: full comprehensive 123-extinguisher inventory
-    const displayedExts =
-      period === 'Diário'
-        ? [...extinguishers.filter((e) => e.status !== 'Em dia'), ...extinguishers.filter((e) => e.status === 'Em dia')].slice(0, 35)
-        : period === 'Semanal'
-        ? [...extinguishers.filter((e) => e.status === 'Atenção' || e.status === 'Vencido'), ...extinguishers.filter((e) => e.status === 'Em dia')].slice(0, 60)
-        : extinguishers;
-
-    const tableRows = displayedExts.map((ext) => [
+    const tableRows = dataset.extinguishers.map((ext) => [
       ext.code,
       ext.type,
       ext.floor,
       ext.location,
-      ext.capacity,
+      ext.nextInspectionDate || ext.expirationDate || '-',
       ext.status,
     ]);
 
     autoTable(doc, {
       startY: currentY + 4,
-      head: [['Código', 'Tipo de Agente', 'Pavimento', 'Localização Específica', 'Capacidade', 'Status']],
+      head: [['Código', 'Tipo de Agente', 'Pavimento', 'Localização Específica', 'Próx. Insp./Val.', 'Status']],
       body: tableRows,
       theme: 'grid',
       headStyles: {
@@ -219,11 +222,11 @@ export function generatePdfReport({
         overflow: 'linebreak',
       },
       columnStyles: {
-        0: { cellWidth: 20, fontStyle: 'bold' },
-        1: { cellWidth: 32 },
-        2: { cellWidth: 24 },
-        3: { cellWidth: 62 },
-        4: { cellWidth: 22 },
+        0: { cellWidth: 18, fontStyle: 'bold' },
+        1: { cellWidth: 30 },
+        2: { cellWidth: 28 },
+        3: { cellWidth: 56 },
+        4: { cellWidth: 28, halign: 'center' },
         5: { cellWidth: 22, halign: 'center' },
       },
       didParseCell: (data) => {
@@ -243,6 +246,67 @@ export function generatePdfReport({
       },
       margin: { left: 14, right: 14 },
     });
+
+    // 5b. Period Inspections Table
+    let afterEquipY = (doc as any).lastAutoTable?.finalY || currentY + 60;
+    if (dataset.inspections.length > 0) {
+      if (doc.internal.pageSize.getHeight() - afterEquipY < 45) {
+        doc.addPage();
+        afterEquipY = 20;
+      } else {
+        afterEquipY += 10;
+      }
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(30, 41, 59);
+      doc.text(
+        `3. Inspeções Registradas / Programadas no Período (${dataset.inspections.length})`,
+        14,
+        afterEquipY
+      );
+
+      autoTable(doc, {
+        startY: afterEquipY + 4,
+        head: [['Cód.', 'Extintor', 'Data Insp.', 'Validade', 'Próx. Insp.', 'Responsável', 'Status']],
+        body: dataset.inspections.map((i) => [
+          i.code,
+          `#${i.extinguisherCode}`,
+          i.date,
+          i.validityDate || '-',
+          i.nextInspectionDate || '-',
+          i.responsible,
+          i.status,
+        ]),
+        theme: 'grid',
+        headStyles: {
+          fillColor: [51, 65, 85],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 7.5,
+        },
+        styles: {
+          fontSize: 7.2,
+          cellPadding: 1.8,
+        },
+        didParseCell: (data) => {
+          if (data.section === 'body' && data.column.index === 6) {
+            const val = data.cell.raw;
+            if (val === 'Em dia') {
+              data.cell.styles.textColor = [4, 120, 87];
+              data.cell.styles.fontStyle = 'bold';
+            } else if (val === 'Atenção') {
+              data.cell.styles.textColor = [180, 83, 9];
+              data.cell.styles.fontStyle = 'bold';
+            } else {
+              data.cell.styles.textColor = [185, 28, 28];
+              data.cell.styles.fontStyle = 'bold';
+            }
+          }
+        },
+        margin: { left: 14, right: 14 },
+      });
+    }
 
     // 6. Signatures block at the end
     const lastY = (doc as any).lastAutoTable?.finalY || currentY + 60;

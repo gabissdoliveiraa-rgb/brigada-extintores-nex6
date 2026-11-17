@@ -100,7 +100,15 @@ export interface BrigadeMember {
 
 export interface Notice {
   id: string;
-  type: 'Inspeção vencida' | 'Recarga vencida' | 'Treinamento a vencer' | 'Aviso geral';
+  type:
+    | 'Inspeção vencida'
+    | 'Recarga vencida'
+    | 'Treinamento a vencer'
+    | 'Aviso geral'
+    | 'Recarga / Validade Vencida'
+    | 'Recarga / Inspeção Próxima'
+    | 'Inspeção Vencida'
+    | 'Inspeção Próxima';
   description: string;
   date: string;
   status: 'Vencido' | 'A vencer' | 'Pendente';

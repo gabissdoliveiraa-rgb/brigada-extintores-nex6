@@ -14,7 +14,7 @@ import {
 } from '../types/brigada';
 import { Users, CheckCircle2, AlertTriangle, History, ArrowRight } from 'lucide-react';
 import { ExtinguisherIcon } from './ExtinguisherIcon';
-import { calculateDashboardStats } from '../utils/brigadaLogic';
+import { calculateDashboardStats, getDaysUntilDate } from '../utils/brigadaLogic';
 import { ViewTab } from './Sidebar';
 
 interface DashboardViewProps {
@@ -39,22 +39,33 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const stats = calculateDashboardStats(members, extinguishers);
   const firstName = user.name.split(' ')[0] || user.name;
 
-  // Derive upcoming inspections directly from real extinguishers in database
+  const statusPriority = (status: string) =>
+    status === 'Vencido' ? 0 : status === 'Atenção' ? 1 : 2;
+
+  // Derive upcoming inspections prioritized by urgency and nearest due date
   const upcomingInspections = (
     inspections.length > 0
-      ? inspections.slice(0, 4).map((i) => ({
-          code: i.code,
+      ? inspections.map((i) => ({
+          code: i.extinguisherCode || i.code,
           location: `${i.location} (${i.floor})`,
-          nextDate: i.nextInspectionDate,
+          nextDate: i.nextInspectionDate || i.validityDate || '-',
           status: i.status,
         }))
-      : extinguishers.slice(0, 4).map((e) => ({
+      : extinguishers.map((e) => ({
           code: e.code,
           location: `${e.location} (${e.floor})`,
-          nextDate: e.nextInspectionDate || '15/08/2026',
+          nextDate: e.nextInspectionDate || e.expirationDate || '-',
           status: e.status,
         }))
-  );
+  )
+    .sort((a, b) => {
+      const diffStatus = statusPriority(a.status) - statusPriority(b.status);
+      if (diffStatus !== 0) return diffStatus;
+      const daysA = getDaysUntilDate(a.nextDate) ?? 9999;
+      const daysB = getDaysUntilDate(b.nextDate) ?? 9999;
+      return daysA - daysB;
+    })
+    .slice(0, 4);
 
   return (
     <div className="space-y-8 animate-fadeIn">
@@ -173,7 +184,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                         {row.nextDate}
                       </td>
                       <td className="py-3.5 px-2 text-right">
-                        <span className="inline-block px-3 py-0.5 text-xs font-semibold rounded-md border border-emerald-400 text-emerald-700 bg-emerald-50/50">
+                        <span
+                          className={`inline-block px-3 py-0.5 text-xs font-semibold rounded-md border ${
+                            row.status === 'Em dia'
+                              ? 'border-emerald-400 text-emerald-700 bg-emerald-50/50'
+                              : row.status === 'Atenção'
+                              ? 'border-amber-400 text-amber-700 bg-amber-50/50'
+                              : 'border-red-400 text-red-700 bg-red-50/50'
+                          }`}
+                        >
                           {row.status}
                         </span>
                       </td>
@@ -202,29 +221,43 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </h2>
 
             <div className="space-y-3.5">
-              {notices.slice(0, 3).map((notice) => (
-                <div
-                  key={notice.id}
-                  className="flex items-start gap-3 p-2.5 rounded-xl hover:bg-slate-50 transition-colors cursor-pointer"
-                  onClick={() => onNavigate('avisos')}
-                >
-                  <div className="mt-0.5 text-red-600 shrink-0">
-                    {notice.type.includes('Recarga') ? (
-                      <ExtinguisherIcon size={18} />
-                    ) : (
-                      <AlertTriangle size={18} />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold text-slate-900 truncate">
-                      {notice.description}
-                    </p>
-                    <p className="text-[11px] text-slate-600 mt-0.5">
-                      Vencido em {notice.date}
-                    </p>
-                  </div>
+              {notices.length === 0 ? (
+                <div className="p-4 rounded-xl bg-emerald-50/60 border border-emerald-200 text-xs text-emerald-800 font-medium">
+                  Nenhum extintor vencido ou em atenção no momento.
                 </div>
-              ))}
+              ) : (
+                notices.slice(0, 3).map((notice) => (
+                  <div
+                    key={notice.id}
+                    className="flex items-start gap-3 p-2.5 rounded-xl hover:bg-slate-50 transition-colors cursor-pointer"
+                    onClick={() => onNavigate('avisos')}
+                  >
+                    <div
+                      className={`mt-0.5 shrink-0 ${
+                        notice.status === 'Vencido'
+                          ? 'text-red-600'
+                          : 'text-amber-500'
+                      }`}
+                    >
+                      {notice.type.includes('Recarga') ? (
+                        <ExtinguisherIcon size={18} />
+                      ) : (
+                        <AlertTriangle size={18} />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-bold text-slate-900 truncate">
+                        {notice.description}
+                      </p>
+                      <p className="text-[11px] text-slate-600 mt-0.5">
+                        {notice.status === 'Vencido'
+                          ? `Vencido em ${notice.date}`
+                          : `A vencer em ${notice.date}`}
+                      </p>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
 

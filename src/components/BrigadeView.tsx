@@ -8,7 +8,11 @@ import {
   BrigadeMember,
   UserProfile,
 } from '../types/brigada';
-import { canPerformAdminAction, calculateBrigadeStats } from '../utils/brigadaLogic';
+import {
+  canPerformAdminAction,
+  calculateBrigadeStats,
+  getDaysUntilDate,
+} from '../utils/brigadaLogic';
 import {
   Plus,
   Pencil,
@@ -141,13 +145,19 @@ export const BrigadeView: React.FC<BrigadeViewProps> = ({
     }
   };
 
-  // Automatic date mask and live validation
+  // Automatic date mask, live validation, and auto-sync training status
   const handleDateChange = (val: string) => {
     const formatted = formatDate(val);
     setFormTrainingExpiration(formatted);
     if (formatted.length === 10) {
       const chk = validateDate(formatted);
       setFormErrors((prev) => ({ ...prev, date: chk.valid ? undefined : chk.error }));
+      if (chk.valid) {
+        const days = getDaysUntilDate(formatted);
+        if (days !== null) {
+          setFormTrainingStatus(days < 0 ? 'Vencido' : 'Em dia');
+        }
+      }
     } else if (formatted.length > 0 && formatted.length < 10) {
       setFormErrors((prev) => ({ ...prev, date: 'Data incompleta (DD/MM/AAAA)' }));
     } else {
@@ -703,6 +713,28 @@ export const BrigadeView: React.FC<BrigadeViewProps> = ({
                       <option value="Em dia">Em dia</option>
                       <option value="Vencido">Vencido</option>
                     </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Vencimento do Treinamento
+                    </label>
+                    <input
+                      type="text"
+                      value={formTrainingExpiration}
+                      onChange={(e) => handleDateChange(e.target.value)}
+                      placeholder="DD/MM/AAAA"
+                      maxLength={10}
+                      className={`w-full px-3 py-2 text-sm bg-white border rounded-lg focus:outline-none focus:ring-2 ${
+                        formErrors.date ? 'border-red-500 focus:ring-red-500' : 'border-slate-300 focus:ring-red-500'
+                      }`}
+                    />
+                    {formErrors.date && (
+                      <p className="text-[11px] text-red-600 mt-1 font-medium flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 shrink-0" />
+                        <span>{formErrors.date}</span>
+                      </p>
+                    )}
                   </div>
                 </div>
 

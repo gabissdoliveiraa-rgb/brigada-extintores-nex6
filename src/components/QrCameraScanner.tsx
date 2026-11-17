@@ -35,6 +35,7 @@ export const QrCameraScanner: React.FC<QrCameraScannerProps> = ({
 }) => {
   const [status, setStatus] = useState<CameraStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [imageError, setImageError] = useState<string | null>(null);
   const [scannedCode, setScannedCode] = useState<string>('');
   const [hasMultipleCameras, setHasMultipleCameras] = useState(false);
   const [facingMode, setFacingMode] = useState<'environment' | 'user'>(
@@ -241,6 +242,7 @@ export const QrCameraScanner: React.FC<QrCameraScannerProps> = ({
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setImageError(null);
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -257,7 +259,7 @@ export const QrCameraScanner: React.FC<QrCameraScannerProps> = ({
           if (qrCode && qrCode.data) {
             handleDetected(qrCode.data);
           } else {
-            alert(
+            setImageError(
               'Nenhum QR Code legível foi encontrado nesta imagem. Tente uma foto mais nítida ou aproximada.'
             );
           }
@@ -266,6 +268,7 @@ export const QrCameraScanner: React.FC<QrCameraScannerProps> = ({
       img.src = event.target?.result as string;
     };
     reader.readAsDataURL(file);
+    if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
 
@@ -407,6 +410,22 @@ export const QrCameraScanner: React.FC<QrCameraScannerProps> = ({
           onChange={handleImageUpload}
         />
       </div>
+
+      {imageError && (
+        <div className="mt-4 max-w-md w-full p-3 bg-red-50 border border-red-200 rounded-xl flex items-center justify-between gap-2 text-xs text-red-700">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+            <span>{imageError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setImageError(null)}
+            className="font-semibold hover:underline cursor-pointer shrink-0"
+          >
+            Fechar
+          </button>
+        </div>
+      )}
 
 
       {/* Bottom Action buttons matching MacBook Air - 34 */}

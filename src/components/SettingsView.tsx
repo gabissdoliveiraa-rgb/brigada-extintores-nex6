@@ -13,6 +13,8 @@ import {
   Camera,
   Trash2,
   AlertCircle,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import {
   formatPhone,
@@ -28,6 +30,7 @@ interface SettingsViewProps {
   user: UserProfile;
   onUpdateUser: (updated: UserProfile) => void;
   onLogout: () => void;
+  onShowToast?: (message: string) => void;
   initialEditing?: boolean;
 }
 
@@ -35,6 +38,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   user,
   onUpdateUser,
   onLogout,
+  onShowToast,
   initialEditing = false,
 }) => {
   const [isEditing, setIsEditing] = useState(initialEditing);
@@ -53,6 +57,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     user.birthDate || '27/07/2000'
   );
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(user.avatarUrl);
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPasswords, setShowPasswords] = useState(false);
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   // Field error states
   const [errors, setErrors] = useState<{
@@ -61,6 +69,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     phone?: string;
     birthDate?: string;
     sector?: string;
+    password?: string;
   }>({});
 
   // Synchronize when user prop updates
@@ -141,10 +150,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      alert('Por favor, selecione um arquivo de imagem.');
+      const msg = 'Por favor, selecione um arquivo de imagem válido.';
+      setPhotoError(msg);
+      onShowToast?.(msg);
+      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
 
+    setPhotoError(null);
     const reader = new FileReader();
     reader.onload = (event) => {
       const base64 = event.target?.result as string;
@@ -157,6 +170,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleRemovePhoto = (e: React.MouseEvent) => {
     e.stopPropagation();
     setAvatarUrl(undefined);
+    setPhotoError(null);
   };
 
   const handleSave = (e: React.FormEvent) => {
@@ -167,12 +181,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const phoneCheck = validatePhone(editPhone);
     const dateCheck = validateDate(editBirthDate);
 
+    let passwordError: string | undefined;
+    if (newPassword || confirmPassword) {
+      if (newPassword.trim().length < 4) {
+        passwordError = 'A nova senha deve ter pelo menos 4 caracteres.';
+      } else if (newPassword !== confirmPassword) {
+        passwordError = 'A confirmação de senha não confere.';
+      }
+    }
+
     const newErrors = {
       name: nameCheck.valid ? undefined : nameCheck.error,
       email: emailCheck.valid ? undefined : emailCheck.error,
       phone: phoneCheck.valid ? undefined : phoneCheck.error,
       birthDate: dateCheck.valid ? undefined : dateCheck.error,
       sector: editSector ? undefined : 'Selecione um andar ou setor',
+      password: passwordError,
     };
 
     setErrors(newErrors);
@@ -190,7 +214,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       responsibleSector: editSector,
       birthDate: editBirthDate.trim(),
       avatarUrl,
+      password: newPassword.trim() ? newPassword.trim() : user.password,
     });
+    setNewPassword('');
+    setConfirmPassword('');
+    setPhotoError(null);
     setIsEditing(false);
   };
 
@@ -283,6 +311,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       <Trash2 className="w-3 h-3" />
                       <span>Remover foto</span>
                     </button>
+                  )}
+                  {photoError && (
+                    <p className="text-[11px] text-red-600 font-medium pt-1">
+                      {photoError}
+                    </p>
                   )}
                 </div>
 
@@ -444,6 +477,65 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       </p>
                     )}
                   </div>
+
+                  {/* Alterar senha (opcional) */}
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Nova senha (opcional)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showPasswords ? 'text' : 'password'}
+                        value={newPassword}
+                        onChange={(e) => {
+                          setNewPassword(e.target.value);
+                          setErrors((prev) => ({ ...prev, password: undefined }));
+                        }}
+                        placeholder="Deixe vazio para manter a atual"
+                        autoComplete="new-password"
+                        className="w-full px-3 py-2 pr-9 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPasswords((p) => !p)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                        tabIndex={-1}
+                      >
+                        {showPasswords ? (
+                          <EyeOff className="w-4 h-4" />
+                        ) : (
+                          <Eye className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Confirmar nova senha
+                    </label>
+                    <input
+                      type={showPasswords ? 'text' : 'password'}
+                      value={confirmPassword}
+                      onChange={(e) => {
+                        setConfirmPassword(e.target.value);
+                        setErrors((prev) => ({ ...prev, password: undefined }));
+                      }}
+                      placeholder="Repita a nova senha"
+                      autoComplete="new-password"
+                      className={`w-full px-3 py-2 text-sm bg-white border rounded-lg focus:outline-none focus:ring-2 ${
+                        errors.password
+                          ? 'border-red-500 focus:ring-red-500'
+                          : 'border-slate-300 focus:ring-red-500'
+                      }`}
+                    />
+                    {errors.password && (
+                      <p className="text-[11px] text-red-600 mt-1 font-medium flex items-center gap-1">
+                        <AlertCircle className="w-3 h-3 shrink-0" />
+                        <span>{errors.password}</span>
+                      </p>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-end gap-3 pt-6 border-t border-slate-100">
@@ -452,6 +544,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     onClick={() => {
                       setIsEditing(false);
                       setErrors({});
+                      setNewPassword('');
+                      setConfirmPassword('');
+                      setPhotoError(null);
                     }}
                     className="px-5 py-2.5 bg-white border border-slate-300 text-slate-700 text-xs font-semibold rounded-lg hover:bg-slate-50 cursor-pointer"
                   >

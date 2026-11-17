@@ -92,7 +92,7 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
   const [formRole, setFormRole] = useState<UserRole>('Funcionário');
   const [formEmail, setFormEmail] = useState('');
   const [formPhone, setFormPhone] = useState('');
-  const [formPassword, setFormPassword] = useState('senai123');
+  const [formPassword, setFormPassword] = useState('');
   const [formSector, setFormSector] = useState('1º andar');
   const [showPassword, setShowPassword] = useState(false);
 
@@ -121,7 +121,7 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
     setFormRole('Funcionário');
     setFormEmail('');
     setFormPhone('(11) 9');
-    setFormPassword('senai123');
+    setFormPassword('');
     setFormSector('1º andar');
     setUserModalOpen(true);
   };
@@ -132,42 +132,75 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
     setFormRole(user.role);
     setFormEmail(user.email);
     setFormPhone(user.phone);
-    setFormPassword(user.password || 'senai123');
+    setFormPassword(user.password || '');
     setFormSector(user.responsibleSector || '1º andar');
     setUserModalOpen(true);
   };
 
   const handleSaveUser = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formName.trim() || !formEmail.trim()) {
+    const trimmedName = formName.trim();
+    const trimmedEmail = formEmail.trim();
+    const trimmedPhone = formPhone.trim();
+
+    if (!trimmedName || !trimmedEmail) {
       onShowToast('Nome e e-mail são obrigatórios.');
       return;
     }
+
+    const emailChk = validateEmail(trimmedEmail);
+    if (!emailChk.valid) {
+      onShowToast(emailChk.error || 'Informe um e-mail válido.');
+      return;
+    }
+
+    const duplicate = users.some(
+      (u) =>
+        u.id !== editingUserId &&
+        u.email.trim().toLowerCase() === trimmedEmail.toLowerCase()
+    );
+    if (duplicate) {
+      onShowToast('Já existe uma conta cadastrada com este e-mail.');
+      return;
+    }
+
+    if (trimmedPhone && trimmedPhone !== '(11) 9') {
+      const phoneChk = validatePhone(trimmedPhone);
+      if (!phoneChk.valid) {
+        onShowToast(phoneChk.error || 'Telefone inválido (use DDD + número).');
+        return;
+      }
+    }
+
+    if (!editingUserId && !formPassword.trim()) {
+      onShowToast('Digite uma senha de acesso para o novo e-mail.');
+      return;
+    }
+
+    const normalizedPhone = trimmedPhone === '(11) 9' ? '' : trimmedPhone;
 
     if (editingUserId) {
       const existing = users.find((u) => u.id === editingUserId);
       if (existing) {
         onUpdateUser({
           ...existing,
-          name: formName.trim(),
+          name: trimmedName,
           role: formRole,
-          email: formEmail.trim(),
-          phone: formPhone.trim(),
-          password: formPassword.trim() || 'senai123',
+          email: trimmedEmail,
+          phone: normalizedPhone,
+          password: formPassword.trim() || existing.password,
           responsibleSector: formSector.trim(),
         });
-        onShowToast(`Usuário ${formName} atualizado com sucesso!`);
       }
     } else {
       onAddUser({
-        name: formName.trim(),
+        name: trimmedName,
         role: formRole,
-        email: formEmail.trim(),
-        phone: formPhone.trim(),
-        password: formPassword.trim() || 'senai123',
+        email: trimmedEmail,
+        phone: normalizedPhone,
+        password: formPassword.trim(),
         responsibleSector: formSector.trim(),
       });
-      onShowToast(`Usuário ${formName} cadastrado no banco de dados!`);
     }
 
     setUserModalOpen(false);
@@ -813,7 +846,7 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
                   placeholder="usuario@senaisp.edu.br"
                   className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-red-500"
                 />
-                {formEmail && !validateEmail(formEmail) && (
+                {formEmail && !validateEmail(formEmail).valid && (
                   <p className="text-[11px] text-red-600 mt-1 font-medium">
                     E-mail inválido (ex: nome@senaisp.edu.br)
                   </p>
@@ -833,23 +866,31 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
                     placeholder="(11) 98765-4321"
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-red-500"
                   />
-                  {formPhone && !validatePhone(formPhone) && (
-                    <p className="text-[11px] text-red-600 mt-1 font-medium">
-                      Telefone inválido (use DDD + número)
-                    </p>
-                  )}
+                  {formPhone &&
+                    formPhone !== '(11) 9' &&
+                    !validatePhone(formPhone).valid && (
+                      <p className="text-[11px] text-red-600 mt-1 font-medium">
+                        Telefone inválido (use DDD + número)
+                      </p>
+                    )}
                 </div>
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Senha de Acesso
+                    Senha de Acesso {editingUserId ? '' : '*'}
                   </label>
                   <div className="relative">
                     <input
                       type={showPassword ? 'text' : 'password'}
+                      required={!editingUserId}
                       value={formPassword}
                       onChange={(e) => setFormPassword(e.target.value)}
-                      placeholder="Senha do usuário"
+                      placeholder={
+                        editingUserId
+                          ? 'Manter ou digitar nova senha'
+                          : 'Digite a senha de acesso'
+                      }
+                      autoComplete="new-password"
                       className="w-full px-3 py-2 pr-8 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-red-500"
                     />
                     <button

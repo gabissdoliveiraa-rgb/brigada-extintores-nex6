@@ -21,12 +21,14 @@ import {
   INITIAL_USERS,
 } from '../data/initialData';
 import { buildActivityEntry } from '../utils/activityUtils';
+import { computeStatusFromValidity } from '../utils/brigadaLogic';
 import { db } from '../firebase';
 import {
   collection,
   doc,
   setDoc,
   deleteDoc,
+  getDocs,
   onSnapshot,
   writeBatch,
   Unsubscribe,
@@ -39,6 +41,7 @@ const KEYS = {
   MEMBERS: 'senai_db_members_v2',
   NOTICES: 'senai_db_notices_rh049',
   ACTIVITY_LOGS: 'senai_db_activity_logs_rh049',
+  ACTIVITY_CLEARED: 'senai_db_logs_cleared_v1',
 };
 
 // Subscriber listeners for real-time reactivity across devices
@@ -90,6 +93,96 @@ function sanitizeDocId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_\-]/g, '_');
 }
 
+async function replaceFirestoreCollection<T extends { id: string }>(
+  collectionName: string,
+  items: T[]
+): Promise<void> {
+  if (!db || typeof window === 'undefined') return;
+  try {
+    const colRef = collection(db, collectionName);
+    const existingSnap = await getDocs(colRef);
+    const keepIds = new Set(items.map((item) => sanitizeDocId(item.id)));
+
+    const staleRefs = existingSnap.docs
+      .filter((d) => !keepIds.has(d.id))
+      .map((d) => d.ref);
+
+    for (let i = 0; i < staleRefs.length; i += 400) {
+      const delBatch = writeBatch(db);
+      staleRefs.slice(i, i + 400).forEach((ref) => delBatch.delete(ref));
+      await delBatch.commit();
+    }
+
+    for (let i = 0; i < items.length; i += 400) {
+      const setBatch = writeBatch(db);
+      items.slice(i, i + 400).forEach((item) => {
+        setBatch.set(
+          doc(db!, collectionName, sanitizeDocId(item.id)),
+          cleanForFirestore(item)
+        );
+      });
+      await setBatch.commit();
+    }
+  } catch (err) {
+    console.warn(`Erro ao sincronizar coleção ${collectionName} no Firestore:`, err);
+  }
+}
+
+function normalizeExtinguisherRecord(ext: Extinguisher): { item: Extinguisher; changed: boolean } {
+  let changed = false;
+  let nextInspectionDate = ext.nextInspectionDate;
+  if (ext.nextInspectionDate === '15/10/2026' && ext.status === 'Em dia') {
+    nextInspectionDate = '11/02/2027';
+    changed = true;
+  } else if (ext.nextInspectionDate === '15/03/2026' && ext.status === 'Atenção') {
+    nextInspectionDate = '05/12/2026';
+    changed = true;
+  }
+  const derivedStatus =
+    nextInspectionDate || ext.expirationDate
+      ? computeStatusFromValidity(ext.expirationDate, nextInspectionDate)
+      : ext.status;
+  if (derivedStatus !== ext.status) {
+    changed = true;
+  }
+  return {
+    item: changed ? { ...ext, nextInspectionDate, status: derivedStatus } : ext,
+    changed,
+  };
+}
+
+function normalizeInspectionRecord(insp: Inspection): { item: Inspection; changed: boolean } {
+  let changed = false;
+  let validityDate = insp.validityDate;
+  let nextInspectionDate = insp.nextInspectionDate;
+
+  if (insp.status === 'Vencido' && validityDate === '11/02/2027') {
+    validityDate = '10/01/2026';
+    nextInspectionDate = '10/01/2026';
+    changed = true;
+  } else if (nextInspectionDate === '15/03/2026' && insp.status === 'Atenção') {
+    validityDate = '05/12/2026';
+    nextInspectionDate = '05/12/2026';
+    changed = true;
+  } else if (nextInspectionDate === '15/10/2026' && insp.status === 'Em dia') {
+    validityDate = '11/02/2027';
+    nextInspectionDate = '11/02/2027';
+    changed = true;
+  }
+
+  const derivedStatus = computeStatusFromValidity(validityDate, nextInspectionDate);
+  if (derivedStatus !== insp.status) {
+    changed = true;
+  }
+
+  return {
+    item: changed
+      ? { ...insp, validityDate, nextInspectionDate, status: derivedStatus }
+      : insp,
+    changed,
+  };
+}
+
 /**
  * Recursively cleans an object so that no property has the value `undefined`.
  * Firestore throws a runtime error if any property value is `undefined`.
@@ -133,19 +226,7 @@ export const dbUsers = {
   saveAll: (users: RegisteredUser[]): void => {
     saveToStorage(KEYS.USERS, users);
     notify(listeners.users, users);
-    // Sync batch to Firestore
-    if (db && typeof window !== 'undefined') {
-      try {
-        const batch = writeBatch(db);
-        users.forEach((u) => {
-          const ref = doc(db, 'users', sanitizeDocId(u.id));
-          batch.set(ref, cleanForFirestore(u));
-        });
-        batch.commit().catch((err) => console.warn('Erro ao salvar usuários no Firestore:', err));
-      } catch (err) {
-        console.warn('Erro ao preparar batch de usuários:', err);
-      }
-    }
+    void replaceFirestoreCollection('users', users);
   },
   create: (user: Omit<RegisteredUser, 'id'>): RegisteredUser => {
     const list = dbUsers.getAll();
@@ -235,7 +316,16 @@ export const dbExtinguishers = {
       saveToStorage(KEYS.EXTINGUISHERS, INITIAL_EXTINGUISHERS);
       return INITIAL_EXTINGUISHERS;
     }
-    return list;
+    let anyChanged = false;
+    const normalized = list.map((ext) => {
+      const res = normalizeExtinguisherRecord(ext);
+      if (res.changed) anyChanged = true;
+      return res.item;
+    });
+    if (anyChanged) {
+      saveToStorage(KEYS.EXTINGUISHERS, normalized);
+    }
+    return normalized;
   },
   subscribe: (cb: Listener<Extinguisher[]>): (() => void) => {
     listeners.extinguishers.add(cb);
@@ -244,22 +334,7 @@ export const dbExtinguishers = {
   saveAll: (exts: Extinguisher[]): void => {
     saveToStorage(KEYS.EXTINGUISHERS, exts);
     notify(listeners.extinguishers, exts);
-
-    if (db && typeof window !== 'undefined') {
-      try {
-        // Chunk into batches of 400 (Firestore limit is 500)
-        for (let i = 0; i < exts.length; i += 400) {
-          const chunk = exts.slice(i, i + 400);
-          const batch = writeBatch(db);
-          chunk.forEach((ext) => {
-            batch.set(doc(db, 'extinguishers', sanitizeDocId(ext.id)), cleanForFirestore(ext));
-          });
-          batch.commit().catch((err) => console.warn('Erro ao sincronizar extintores no Firestore:', err));
-        }
-      } catch (err) {
-        console.warn('Erro ao preparar lote de extintores:', err);
-      }
-    }
+    void replaceFirestoreCollection('extinguishers', exts);
   },
   create: (ext: Extinguisher): Extinguisher => {
     const extWithQr: Extinguisher = {
@@ -325,7 +400,17 @@ export const dbExtinguishers = {
 // --- INSPECTIONS CRUD ---
 export const dbInspections = {
   getAll: (): Inspection[] => {
-    return loadFromStorage<Inspection[]>(KEYS.INSPECTIONS, INITIAL_INSPECTIONS);
+    const list = loadFromStorage<Inspection[]>(KEYS.INSPECTIONS, INITIAL_INSPECTIONS);
+    let anyChanged = false;
+    const normalized = list.map((insp) => {
+      const res = normalizeInspectionRecord(insp);
+      if (res.changed) anyChanged = true;
+      return res.item;
+    });
+    if (anyChanged) {
+      saveToStorage(KEYS.INSPECTIONS, normalized);
+    }
+    return normalized;
   },
   subscribe: (cb: Listener<Inspection[]>): (() => void) => {
     listeners.inspections.add(cb);
@@ -334,21 +419,25 @@ export const dbInspections = {
   saveAll: (inspections: Inspection[]): void => {
     saveToStorage(KEYS.INSPECTIONS, inspections);
     notify(listeners.inspections, inspections);
+    void replaceFirestoreCollection('inspections', inspections);
+  },
+  create: (insp: Inspection): Inspection => {
+    const list = dbInspections.getAll();
+    const updated = [insp, ...list];
+    saveToStorage(KEYS.INSPECTIONS, updated);
+    notify(listeners.inspections, updated);
 
     if (db && typeof window !== 'undefined') {
       try {
-        for (let i = 0; i < inspections.length; i += 400) {
-          const chunk = inspections.slice(i, i + 400);
-          const batch = writeBatch(db);
-          chunk.forEach((insp) => {
-            batch.set(doc(db, 'inspections', sanitizeDocId(insp.id)), cleanForFirestore(insp));
-          });
-          batch.commit().catch((err) => console.warn('Erro ao sincronizar inspeções:', err));
-        }
+        setDoc(doc(db, 'inspections', sanitizeDocId(insp.id)), cleanForFirestore(insp)).catch((err) =>
+          console.warn('Erro ao criar inspeção no Firestore:', err)
+        );
       } catch (err) {
-        console.warn('Erro no batch de inspeções:', err);
+        console.warn('Erro no create de inspeção:', err);
       }
     }
+
+    return insp;
   },
   update: (insp: Inspection): void => {
     const list = dbInspections.getAll();
@@ -364,6 +453,22 @@ export const dbInspections = {
       } catch (err) {
         console.warn('Erro no update de inspeção:', err);
       }
+    }
+  },
+  deleteByExtinguisherCode: (code: string): void => {
+    const list = dbInspections.getAll();
+    const removed = list.filter((i) => i.extinguisherCode === code);
+    if (removed.length === 0) return;
+    const filtered = list.filter((i) => i.extinguisherCode !== code);
+    saveToStorage(KEYS.INSPECTIONS, filtered);
+    notify(listeners.inspections, filtered);
+
+    if (db && typeof window !== 'undefined') {
+      removed.forEach((insp) => {
+        deleteDoc(doc(db!, 'inspections', sanitizeDocId(insp.id))).catch((err) =>
+          console.warn('Erro ao excluir inspeção associada no Firestore:', err)
+        );
+      });
     }
   },
 };
@@ -385,18 +490,7 @@ export const dbBrigade = {
   saveAll: (members: BrigadeMember[]): void => {
     saveToStorage(KEYS.MEMBERS, members);
     notify(listeners.members, members);
-
-    if (db && typeof window !== 'undefined') {
-      try {
-        const batch = writeBatch(db);
-        members.forEach((m) => {
-          batch.set(doc(db, 'brigade_members', sanitizeDocId(m.id)), cleanForFirestore(m));
-        });
-        batch.commit().catch((err) => console.warn('Erro ao sincronizar brigadistas:', err));
-      } catch (err) {
-        console.warn('Erro no batch de brigadistas:', err);
-      }
-    }
+    void replaceFirestoreCollection('brigade_members', members);
   },
   create: (member: BrigadeMember): BrigadeMember => {
     const list = dbBrigade.getAll();
@@ -462,24 +556,19 @@ export const dbNotices = {
   saveAll: (notices: Notice[]): void => {
     saveToStorage(KEYS.NOTICES, notices);
     notify(listeners.notices, notices);
-
-    if (db && typeof window !== 'undefined') {
-      try {
-        const batch = writeBatch(db);
-        notices.forEach((n) => {
-          batch.set(doc(db, 'notices', sanitizeDocId(n.id)), cleanForFirestore(n));
-        });
-        batch.commit().catch((err) => console.warn('Erro ao sincronizar avisos:', err));
-      } catch (err) {
-        console.warn('Erro no batch de avisos:', err);
-      }
-    }
+    void replaceFirestoreCollection('notices', notices);
   },
 };
 
 // --- ACTIVITY LOGS CRUD ---
 export const dbActivityLogs = {
   getAll: (): ActivityLogEntry[] => {
+    if (
+      typeof localStorage !== 'undefined' &&
+      localStorage.getItem(KEYS.ACTIVITY_CLEARED) === '1'
+    ) {
+      return loadFromStorage<ActivityLogEntry[]>(KEYS.ACTIVITY_LOGS, []);
+    }
     return loadFromStorage<ActivityLogEntry[]>(KEYS.ACTIVITY_LOGS, INITIAL_ACTIVITY_LOGS);
   },
   subscribe: (cb: Listener<ActivityLogEntry[]>): (() => void) => {
@@ -487,20 +576,13 @@ export const dbActivityLogs = {
     return () => listeners.activityLogs.delete(cb);
   },
   saveAll: (logs: ActivityLogEntry[]): void => {
+    if (typeof localStorage !== 'undefined') {
+      if (logs.length === 0) localStorage.setItem(KEYS.ACTIVITY_CLEARED, '1');
+      else localStorage.removeItem(KEYS.ACTIVITY_CLEARED);
+    }
     saveToStorage(KEYS.ACTIVITY_LOGS, logs);
     notify(listeners.activityLogs, logs);
-
-    if (db && typeof window !== 'undefined') {
-      try {
-        const batch = writeBatch(db);
-        logs.slice(0, 100).forEach((l) => {
-          batch.set(doc(db, 'activity_logs', sanitizeDocId(l.id)), cleanForFirestore(l));
-        });
-        batch.commit().catch((err) => console.warn('Erro ao sincronizar logs:', err));
-      } catch (err) {
-        console.warn('Erro no batch de logs:', err);
-      }
-    }
+    void replaceFirestoreCollection('activity_logs', logs.slice(0, 100));
   },
   add: (
     entry: Omit<ActivityLogEntry, 'id' | 'timestamp' | 'formattedDateTime'> & {
@@ -522,6 +604,9 @@ export const dbActivityLogs = {
       date: entry.timestamp,
     });
     const updated = [newEntry, ...list.slice(0, 199)];
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(KEYS.ACTIVITY_CLEARED);
+    }
     saveToStorage(KEYS.ACTIVITY_LOGS, updated);
     notify(listeners.activityLogs, updated);
 
@@ -538,8 +623,12 @@ export const dbActivityLogs = {
     return newEntry;
   },
   clear: (): void => {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(KEYS.ACTIVITY_CLEARED, '1');
+    }
     saveToStorage(KEYS.ACTIVITY_LOGS, []);
     notify(listeners.activityLogs, []);
+    void replaceFirestoreCollection('activity_logs', []);
   },
 };
 
@@ -653,7 +742,21 @@ export function initFirestoreRealtimeSync(): () => void {
           dbExtinguishers.saveAll(INITIAL_EXTINGUISHERS);
         } else {
           const remoteList: Extinguisher[] = [];
-          snapshot.forEach((d) => remoteList.push(d.data() as Extinguisher));
+          const toFix: Extinguisher[] = [];
+          snapshot.forEach((d) => {
+            const res = normalizeExtinguisherRecord(d.data() as Extinguisher);
+            remoteList.push(res.item);
+            if (res.changed) toFix.push(res.item);
+          });
+          if (toFix.length > 0 && db) {
+            for (let i = 0; i < toFix.length; i += 400) {
+              const batch = writeBatch(db);
+              toFix.slice(i, i + 400).forEach((ext) => {
+                batch.set(doc(db!, 'extinguishers', sanitizeDocId(ext.id)), cleanForFirestore(ext));
+              });
+              batch.commit().catch((err) => console.warn('Erro ao normalizar extintores no Firestore:', err));
+            }
+          }
           saveToStorage(KEYS.EXTINGUISHERS, remoteList);
           notify(listeners.extinguishers, remoteList);
         }
@@ -709,7 +812,21 @@ export function initFirestoreRealtimeSync(): () => void {
           dbInspections.saveAll(INITIAL_INSPECTIONS);
         } else {
           const remoteList: Inspection[] = [];
-          snapshot.forEach((d) => remoteList.push(d.data() as Inspection));
+          const toFix: Inspection[] = [];
+          snapshot.forEach((d) => {
+            const res = normalizeInspectionRecord(d.data() as Inspection);
+            remoteList.push(res.item);
+            if (res.changed) toFix.push(res.item);
+          });
+          if (toFix.length > 0 && db) {
+            for (let i = 0; i < toFix.length; i += 400) {
+              const batch = writeBatch(db);
+              toFix.slice(i, i + 400).forEach((insp) => {
+                batch.set(doc(db!, 'inspections', sanitizeDocId(insp.id)), cleanForFirestore(insp));
+              });
+              batch.commit().catch((err) => console.warn('Erro ao normalizar inspeções no Firestore:', err));
+            }
+          }
           saveToStorage(KEYS.INSPECTIONS, remoteList);
           notify(listeners.inspections, remoteList);
         }
@@ -742,9 +859,12 @@ export function initFirestoreRealtimeSync(): () => void {
       logsCol,
       (snapshot) => {
         if (snapshot.empty) {
-          // Auto-seed initial activity logs if collection is empty
-          dbActivityLogs.saveAll(INITIAL_ACTIVITY_LOGS);
+          saveToStorage(KEYS.ACTIVITY_LOGS, []);
+          notify(listeners.activityLogs, []);
         } else {
+          if (typeof localStorage !== 'undefined') {
+            localStorage.removeItem(KEYS.ACTIVITY_CLEARED);
+          }
           const remoteList: ActivityLogEntry[] = [];
           snapshot.forEach((d) => remoteList.push(d.data() as ActivityLogEntry));
           // Sort newest first

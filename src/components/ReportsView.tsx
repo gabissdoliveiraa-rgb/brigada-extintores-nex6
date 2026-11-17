@@ -7,9 +7,15 @@ import React, { useState } from 'react';
 import {
   Extinguisher,
   BrigadeMember,
+  Inspection,
   UserProfile,
 } from '../types/brigada';
-import { generateReportMetrics } from '../utils/brigadaLogic';
+import {
+  filterDataByReportPeriod,
+  filterExtinguishersByFloor,
+  generateReportMetrics,
+} from '../utils/brigadaLogic';
+import { formatDate } from '../utils/maskUtils';
 import { generatePdfReport } from '../utils/pdfGenerator';
 import { SenaiLogo } from './SenaiLogo';
 import {
@@ -27,6 +33,7 @@ import {
 interface ReportsViewProps {
   user: UserProfile;
   extinguishers: Extinguisher[];
+  inspections?: Inspection[];
   members: BrigadeMember[];
   onReportGenerated?: (filename: string, period: string) => void;
 }
@@ -34,42 +41,66 @@ interface ReportsViewProps {
 export const ReportsView: React.FC<ReportsViewProps> = ({
   user,
   extinguishers,
+  inspections = [],
   members,
   onReportGenerated,
 }) => {
   const [period, setPeriod] = useState<'Diário' | 'Semanal' | 'Mensal'>('Diário');
-  const [selectedDate, setSelectedDate] = useState('12/10/2026');
+  const [selectedDate, setSelectedDate] = useState(() =>
+    new Date().toLocaleDateString('pt-BR')
+  );
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
   const [downloadSuccessMessage, setDownloadSuccessMessage] = useState<string | null>(null);
 
-  const metrics = generateReportMetrics(extinguishers);
+  const periodDataset = filterDataByReportPeriod(
+    extinguishers,
+    inspections,
+    period,
+    selectedDate
+  );
+  const metrics = periodDataset.metrics;
 
-  // Bar chart historical comparison points matching Figma
+  const plantMetrics = generateReportMetrics(extinguishers);
+  const terreoMetrics = generateReportMetrics([
+    ...filterExtinguishersByFloor(extinguishers, 'Térreo - Recepção e Portaria'),
+    ...filterExtinguishersByFloor(extinguishers, 'Térreo - Cantina e Oficinas'),
+  ]);
+  const upperFloorsMetrics = generateReportMetrics(
+    extinguishers.filter((e) => !e.floor.startsWith('Térreo'))
+  );
+
+  // Real DB comparisons (Período selecionado vs Planta Geral vs Térreo/Oficinas vs Andares)
   const chartData = [
     {
-      date: selectedDate,
+      date: `Período (${period})`,
       regular: metrics.regular,
       expiring: metrics.expiring,
       critical: metrics.critical,
     },
     {
-      date: '20/09/2026',
-      regular: Math.max(15, Math.round(metrics.regular * 0.85)),
-      expiring: Math.max(4, Math.round(metrics.expiring * 1.2)),
-      critical: Math.max(3, Math.round(metrics.critical * 1.1)),
+      date: `Planta (${plantMetrics.total})`,
+      regular: plantMetrics.regular,
+      expiring: plantMetrics.expiring,
+      critical: plantMetrics.critical,
     },
     {
-      date: '10/08/2026',
-      regular: Math.max(12, Math.round(metrics.regular * 0.75)),
-      expiring: Math.max(3, Math.round(metrics.expiring * 0.9)),
-      critical: Math.max(2, Math.round(metrics.critical * 0.8)),
+      date: 'Térreo & Oficinas',
+      regular: terreoMetrics.regular,
+      expiring: terreoMetrics.expiring,
+      critical: terreoMetrics.critical,
+    },
+    {
+      date: 'Andares (1º–6º)',
+      regular: upperFloorsMetrics.regular,
+      expiring: upperFloorsMetrics.expiring,
+      critical: upperFloorsMetrics.critical,
     },
   ];
 
   const maxVal = Math.max(
     ...chartData.flatMap((d) => [d.regular, d.expiring, d.critical]),
-    20
+    10
   );
 
   const handleDownloadPdf = () => {
@@ -82,6 +113,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
         const result = generatePdfReport({
           user,
           extinguishers,
+          inspections,
           members,
           period,
           selectedDate,
@@ -150,12 +182,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </label>
             <input
               type="text"
+              maxLength={10}
               value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
-              className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-slate-900"
+              onChange={(e) => setSelectedDate(formatDate(e.target.value))}
+              placeholder="DD/MM/AAAA"
+              className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-slate-900 font-mono"
             />
-            <p className="text-[11px] text-slate-400 mt-1.5">
-              Selecione a data do relatório {period.toLowerCase()}
+            <p className="text-[11px] text-slate-500 mt-1.5">
+              Recorte atual: <span className="font-semibold text-slate-700">{periodDataset.periodRangeLabel}</span>
             </p>
           </div>
 
@@ -208,10 +242,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               </div>
               <div>
                 <h2 className="text-lg font-bold text-red-600">
-                  Relatório de Conformidade
+                  Relatório de Conformidade ({period})
                 </h2>
                 <p className="text-xs text-slate-600">
-                  Período: {selectedDate} ({period}) • {extinguishers.length} Extintores Auditados
+                  {periodDataset.periodRangeLabel} • {periodDataset.extinguishers.length} extintores e {periodDataset.inspections.length} inspeções no recorte
+                </p>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  {periodDataset.scopeDescription}
                 </p>
               </div>
             </div>
@@ -226,10 +263,30 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
             </button>
           </div>
 
+          {/* Period KPI Mini Cards */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="bg-white border border-slate-200 rounded-xl p-3.5 text-center shadow-xs">
+              <span className="text-[11px] text-slate-500 block font-medium">No Período</span>
+              <span className="text-xl font-bold text-slate-900">{metrics.total}</span>
+            </div>
+            <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3.5 text-center shadow-xs">
+              <span className="text-[11px] text-emerald-700 block font-medium">Em dia</span>
+              <span className="text-xl font-bold text-emerald-700">{metrics.regular}</span>
+            </div>
+            <div className="bg-amber-50/70 border border-amber-200 rounded-xl p-3.5 text-center shadow-xs">
+              <span className="text-[11px] text-amber-700 block font-medium">Atenção</span>
+              <span className="text-xl font-bold text-amber-700">{metrics.expiring}</span>
+            </div>
+            <div className="bg-red-50/70 border border-red-200 rounded-xl p-3.5 text-center shadow-xs">
+              <span className="text-[11px] text-red-700 block font-medium">Vencidos</span>
+              <span className="text-xl font-bold text-red-700">{metrics.critical}</span>
+            </div>
+          </div>
+
           {/* Bar Chart Card */}
           <div className="bg-white border border-slate-200/90 rounded-2xl p-6 sm:p-8 shadow-xs">
             <h3 className="text-base font-bold text-red-600 mb-8">
-              Resumo de Desempenho dos Extintores
+              Resumo de Desempenho ({period} — {periodDataset.periodRangeLabel})
             </h3>
 
             {/* Chart Graphic Area */}
@@ -354,7 +411,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                     Relatório Técnico de Conformidade
                   </p>
                   <p>Emissão: {selectedDate}</p>
-                  <p>Periodicidade: {period}</p>
+                  <p>Periodicidade: {period} ({periodDataset.periodRangeLabel})</p>
                   <p>Operador: {user.name} ({user.role})</p>
                 </div>
               </div>
@@ -362,11 +419,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               {/* Summary KPIs */}
               <div>
                 <h4 className="text-sm font-bold text-slate-900 mb-3 uppercase tracking-wide">
-                  1. Indicadores de Desempenho e Prontidão
+                  1. Indicadores de Desempenho e Prontidão ({period})
                 </h4>
                 <div className="grid grid-cols-4 gap-3 text-center">
                   <div className="border border-slate-200 rounded-lg p-3 bg-slate-50">
-                    <span className="text-xs text-slate-500 block">Total de Extintores</span>
+                    <span className="text-xs text-slate-500 block">No Período</span>
                     <span className="text-xl font-bold text-slate-900">{metrics.total}</span>
                   </div>
                   <div className="border border-slate-200 rounded-lg p-3 bg-emerald-50/50">
@@ -388,10 +445,10 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
-                    2. Relação de Equipamentos Auditados ({extinguishers.length} no total)
+                    2. Equipamentos do Recorte ({periodDataset.extinguishers.length} itens)
                   </h4>
                   <span className="text-[11px] text-slate-500">
-                    Exibindo primeiros 10 itens na prévia (o PDF baixado contém a lista completa de todos os 123)
+                    Prévia dos primeiros 10 itens (PDF inclui os {periodDataset.extinguishers.length} itens e {periodDataset.inspections.length} inspeções)
                   </span>
                 </div>
                 <table className="w-full text-xs text-left border border-slate-200">
@@ -400,17 +457,17 @@ export const ReportsView: React.FC<ReportsViewProps> = ({
                       <th className="p-2 border-b">Código</th>
                       <th className="p-2 border-b">Tipo</th>
                       <th className="p-2 border-b">Andar/Local</th>
-                      <th className="p-2 border-b">Capacidade</th>
+                      <th className="p-2 border-b">Próx. Insp./Val.</th>
                       <th className="p-2 border-b">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {extinguishers.slice(0, 10).map((ext) => (
+                    {periodDataset.extinguishers.slice(0, 10).map((ext) => (
                       <tr key={ext.id}>
                         <td className="p-2 font-mono font-semibold">{ext.code}</td>
                         <td className="p-2">{ext.type}</td>
                         <td className="p-2">{ext.floor} - {ext.location}</td>
-                        <td className="p-2">{ext.capacity}</td>
+                        <td className="p-2 font-mono">{ext.nextInspectionDate || ext.expirationDate || '-'}</td>
                         <td className="p-2">
                           <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
                             ext.status === 'Em dia'

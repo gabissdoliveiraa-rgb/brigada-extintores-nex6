@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   ActivityActionType,
   ActivityCategory,
@@ -12,7 +12,6 @@ import {
   Extinguisher,
   FullDatabaseBackup,
   Inspection,
-  Notice,
   RegisteredUser,
   UserProfile,
 } from './types/brigada';
@@ -27,7 +26,7 @@ import {
   resetDatabaseToInitial,
   initFirestoreRealtimeSync,
 } from './services/db';
-import { ADMIN_USER, EMPLOYEE_USER } from './data/initialData';
+import { buildDynamicNotices } from './utils/brigadaLogic';
 import { Sidebar, ViewTab } from './components/Sidebar';
 import { HeaderUser } from './components/HeaderUser';
 import { AuthScreen } from './components/AuthScreen';
@@ -41,6 +40,18 @@ import { SettingsView } from './components/SettingsView';
 import { DatabaseView } from './components/DatabaseView';
 import { ProfileView } from './components/ProfileView';
 import { HistoryView } from './components/HistoryView';
+import { AttentionEmailConfirmModal } from './components/AttentionEmailConfirmModal';
+import {
+  ServerAlertStatus,
+  extractRegisteredRecipientEmails,
+  fetchServerAlertStatus,
+  getUnsentAttentionExtinguishers,
+  initAuth,
+  markAttentionAlertsSent,
+  sendAutomaticServerAttentionEmail,
+  sendTestServerEmail,
+  syncSentAttentionMapWithCurrentExtinguishers,
+} from './services/gmailAlert';
 
 export default function App() {
   // Support ?autostart=1 query param from Ultra Mode
@@ -59,25 +70,39 @@ export default function App() {
   const [members, setMembers] = useState<BrigadeMember[]>(() =>
     dbBrigade.getAll()
   );
-  const [notices, setNotices] = useState<Notice[]>(() => dbNotices.getAll());
+  const [notices, setNotices] = useState(() => dbNotices.getAll());
   const [activityLogs, setActivityLogs] = useState<ActivityLogEntry[]>(() =>
     dbActivityLogs.getAll()
   );
 
-  // Active session
+  // Active session: restore only if user still exists in the database
   const [user, setUser] = useState<UserProfile | null>(() => {
-    if (isAutostart) return ADMIN_USER;
+    const currentDbUsers = dbUsers.getAll();
+    if (isAutostart) {
+      return (
+        currentDbUsers.find((u) => u.role === 'Administrador') ||
+        currentDbUsers[0] ||
+        null
+      );
+    }
     const saved = localStorage.getItem('senai_brigada_user');
     if (saved) {
       try {
-        const parsed = JSON.parse(saved);
-        if (parsed && (parsed.id === 'admin_1' || parsed.id === 'employee_1')) {
-          return parsed;
+        const parsed = JSON.parse(saved) as Partial<UserProfile>;
+        if (parsed && parsed.id && parsed.email && parsed.role) {
+          const dbMatch = currentDbUsers.find(
+            (u) =>
+              u.id === parsed.id ||
+              u.email.toLowerCase() === parsed.email!.toLowerCase()
+          );
+          if (dbMatch) {
+            return { ...parsed, ...dbMatch };
+          }
+          localStorage.removeItem('senai_brigada_user');
         }
-        if (parsed && parsed.role === 'Administrador') return ADMIN_USER;
-        if (parsed && parsed.role === 'Funcionário') return EMPLOYEE_USER;
         return null;
       } catch {
+        localStorage.removeItem('senai_brigada_user');
         return null;
       }
     }
@@ -90,12 +115,22 @@ export default function App() {
 
   // Toast feedback state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [attentionEmailTargets, setAttentionEmailTargets] = useState<
+    Extinguisher[]
+  >([]);
+  const [serverAlertStatus, setServerAlertStatus] = useState<ServerAlertStatus>({
+    autoEmailConfigured: false,
+    provider: null,
+    senderEmail: null,
+  });
+  const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
+  const isAutoSendingRef = useRef(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => {
       setToastMessage(null);
-    }, 3000);
+    }, 3500);
   };
 
   const handleOpenProfile = () => {
@@ -119,14 +154,22 @@ export default function App() {
     const unsubMembers = dbBrigade.subscribe((data) => setMembers(data));
     const unsubUsers = dbUsers.subscribe((data) => {
       setUsers(data);
-      // Synchronize active session user when edited from another device
+      // Synchronize active session user and log out if account was removed from database
       setUser((current) => {
         if (!current) return null;
-        const remoteUser = data.find((u) => u.id === current.id);
+        const remoteUser = data.find(
+          (u) =>
+            u.id === current.id ||
+            u.email.toLowerCase() === current.email.toLowerCase()
+        );
         if (remoteUser) {
           const merged = { ...current, ...remoteUser };
           localStorage.setItem('senai_brigada_user', JSON.stringify(merged));
           return merged;
+        }
+        if (data.length > 0) {
+          localStorage.removeItem('senai_brigada_user');
+          return null;
         }
         return current;
       });
@@ -134,6 +177,8 @@ export default function App() {
     const unsubInsp = dbInspections.subscribe((data) => setInspections(data));
     const unsubNotices = dbNotices.subscribe((data) => setNotices(data));
     const unsubLogs = dbActivityLogs.subscribe((data) => setActivityLogs(data));
+    const unsubGoogleAuth = initAuth();
+    fetchServerAlertStatus().then(setServerAlertStatus);
 
     return () => {
       cleanupFirestore();
@@ -143,6 +188,7 @@ export default function App() {
       unsubInsp();
       unsubNotices();
       unsubLogs();
+      unsubGoogleAuth();
     };
   }, []);
 
@@ -174,6 +220,7 @@ export default function App() {
   const handleLoginSuccess = (loggedUser: UserProfile) => {
     setUser(loggedUser);
     setCurrentTab('inicio');
+    fetchServerAlertStatus().then(setServerAlertStatus);
     showToast(`Bem-vindo(a), ${loggedUser.name}!`);
     logActivity('Sistema', 'login', `${loggedUser.name} realizou login no sistema`, undefined, undefined, loggedUser);
   };
@@ -222,10 +269,91 @@ export default function App() {
     }
   };
 
+  const triggerAttentionAlert = useCallback(
+    async (targets: Extinguisher[], forceManualFallback = true) => {
+      if (!targets || targets.length === 0) return;
+      const recipients = extractRegisteredRecipientEmails(users);
+
+      if (serverAlertStatus.autoEmailConfigured && recipients.length > 0) {
+        if (isAutoSendingRef.current) return;
+        isAutoSendingRef.current = true;
+        try {
+          const result = await sendAutomaticServerAttentionEmail(
+            targets,
+            recipients,
+            user?.name
+          );
+          if (result.success) {
+            markAttentionAlertsSent(targets);
+            const sentTo = result.recipients || recipients;
+            const codes = targets.map((e) => e.code);
+            showToast(
+              `Alerta automático enviado para ${sentTo.length} e-mail(s) do banco!`
+            );
+            logActivity(
+              'Sistema',
+              'system',
+              `Sistema enviou alerta automático para ${sentTo.join(', ')} referente a ${targets.length} extintor(es) em Atenção (${codes.join(', ')})`
+            );
+            return;
+          }
+          if (forceManualFallback) {
+            showToast(result.error || 'Falha no envio automático. Abrindo envio via Gmail...');
+            setAttentionEmailTargets(targets);
+          }
+        } finally {
+          isAutoSendingRef.current = false;
+        }
+        return;
+      }
+
+      if (forceManualFallback) {
+        setAttentionEmailTargets(targets);
+      }
+    },
+    [users, serverAlertStatus.autoEmailConfigured, user]
+  );
+
+  // Automatic background scan when extinguishers enter Atenção (e.g., validity window reached)
+  useEffect(() => {
+    syncSentAttentionMapWithCurrentExtinguishers(extinguishers);
+    if (!user || !serverAlertStatus.autoEmailConfigured) return;
+
+    const unsent = getUnsentAttentionExtinguishers(extinguishers);
+    if (unsent.length > 0) {
+      void triggerAttentionAlert(unsent, false);
+    }
+  }, [extinguishers, user, serverAlertStatus.autoEmailConfigured, triggerAttentionAlert]);
+
   // --- Extinguisher Database Handlers ---
   const handleAddExtinguisher = (newExt: Extinguisher) => {
     dbExtinguishers.create(newExt);
     setExtinguishers(dbExtinguishers.getAll());
+
+    const existingForCode = dbInspections
+      .getAll()
+      .some((i) => i.extinguisherCode === newExt.code);
+    if (!existingForCode) {
+      const nextNum = String(dbInspections.getAll().length + 1).padStart(3, '0');
+      const createdInsp: Inspection = {
+        id: `insp_${Date.now()}`,
+        code: nextNum,
+        extinguisherCode: newExt.code,
+        extinguisherType: newExt.type,
+        date: newExt.purchaseDate || new Date().toLocaleDateString('pt-BR'),
+        responsible: user?.name || 'Brigada SENAI',
+        status: newExt.status,
+        floor: newExt.floor,
+        location: newExt.location,
+        capacity: newExt.capacity,
+        validityDate: newExt.expirationDate || newExt.nextInspectionDate || '',
+        nextInspectionDate: newExt.nextInspectionDate || newExt.expirationDate || '',
+        notes: newExt.notes || 'Inspeção inicial criada automaticamente no cadastro.',
+      };
+      dbInspections.create(createdInsp);
+      setInspections(dbInspections.getAll());
+    }
+
     showToast(`Extintor ${newExt.code} cadastrado no banco de dados!`);
     if (user) {
       logActivity(
@@ -236,11 +364,34 @@ export default function App() {
         newExt.floor
       );
     }
+    if (newExt.status === 'Atenção') {
+      void triggerAttentionAlert([newExt], true);
+    }
   };
 
   const handleUpdateExtinguisher = (updated: Extinguisher) => {
     dbExtinguishers.update(updated);
     setExtinguishers(dbExtinguishers.getAll());
+
+    // Sync matching inspection(s) status and dates
+    const currentInspections = dbInspections.getAll();
+    const matchingInspections = currentInspections.filter(
+      (i) => i.extinguisherCode === updated.code
+    );
+    matchingInspections.forEach((insp) => {
+      dbInspections.update({
+        ...insp,
+        status: updated.status,
+        location: updated.location,
+        capacity: updated.capacity,
+        nextInspectionDate: updated.nextInspectionDate || insp.nextInspectionDate,
+        validityDate: updated.nextInspectionDate || updated.expirationDate || insp.validityDate,
+      });
+    });
+    if (matchingInspections.length > 0) {
+      setInspections(dbInspections.getAll());
+    }
+
     showToast(`Extintor ${updated.code} atualizado no banco!`);
     if (user) {
       logActivity(
@@ -251,12 +402,19 @@ export default function App() {
         updated.floor
       );
     }
+    if (updated.status === 'Atenção') {
+      void triggerAttentionAlert([updated], true);
+    }
   };
 
   const handleDeleteExtinguisher = (id: string) => {
     const target = extinguishers.find((e) => e.id === id);
     dbExtinguishers.delete(id);
     setExtinguishers(dbExtinguishers.getAll());
+    if (target) {
+      dbInspections.deleteByExtinguisherCode(target.code);
+      setInspections(dbInspections.getAll());
+    }
     showToast(`Extintor ${target ? target.code : ''} excluído do banco.`);
     if (user) {
       logActivity(
@@ -273,6 +431,24 @@ export default function App() {
   const handleUpdateInspection = (updated: Inspection) => {
     dbInspections.update(updated);
     setInspections(dbInspections.getAll());
+
+    // Sync status and next inspection date back to matching extinguisher
+    const matchingExt = dbExtinguishers
+      .getAll()
+      .find((e) => e.code === updated.extinguisherCode);
+    let syncedExt: Extinguisher | null = null;
+    if (matchingExt) {
+      syncedExt = {
+        ...matchingExt,
+        status: updated.status,
+        location: updated.location || matchingExt.location,
+        capacity: updated.capacity || matchingExt.capacity,
+        nextInspectionDate: updated.nextInspectionDate || updated.validityDate || matchingExt.nextInspectionDate,
+      };
+      dbExtinguishers.update(syncedExt);
+      setExtinguishers(dbExtinguishers.getAll());
+    }
+
     showToast(`Vistoria ${updated.code} salva com sucesso!`);
     if (user) {
       logActivity(
@@ -282,6 +458,20 @@ export default function App() {
         updated.extinguisherCode,
         updated.floor
       );
+    }
+    if (updated.status === 'Atenção') {
+      const targetForEmail: Extinguisher = syncedExt || {
+        id: updated.id,
+        code: updated.extinguisherCode,
+        type: updated.extinguisherType,
+        location: updated.location,
+        floor: updated.floor,
+        capacity: updated.capacity,
+        status: 'Atenção',
+        expirationDate: updated.validityDate,
+        nextInspectionDate: updated.nextInspectionDate,
+      };
+      void triggerAttentionAlert([targetForEmail], true);
     }
   };
 
@@ -367,6 +557,39 @@ export default function App() {
     showToast('Histórico de atividades limpo com sucesso.');
   };
 
+  const registeredRecipientEmails = extractRegisteredRecipientEmails(users);
+
+  const dynamicNotices = useMemo(
+    () => buildDynamicNotices(extinguishers, inspections),
+    [extinguishers, inspections]
+  );
+
+  const handleSendTestEmail = async () => {
+    if (isSendingTestEmail) return;
+    setIsSendingTestEmail(true);
+    try {
+      const result = await sendTestServerEmail(
+        registeredRecipientEmails,
+        user?.name
+      );
+      if (result.success) {
+        const sentTo = result.recipients || registeredRecipientEmails;
+        showToast(
+          `E-mail de teste enviado para ${sentTo.length} destinatário(s)!`
+        );
+        logActivity(
+          'Sistema',
+          'system',
+          `${user?.name || 'Sistema'} enviou um e-mail de teste para ${sentTo.join(', ')}`
+        );
+      } else {
+        showToast(result.error || 'Falha ao enviar e-mail de teste.');
+      }
+    } finally {
+      setIsSendingTestEmail(false);
+    }
+  };
+
   // If not logged in, render the Auth screen
   if (!user) {
     return (
@@ -379,9 +602,21 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex text-slate-800 font-sans antialiased">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[100] focus:px-4 focus:py-2.5 focus:bg-red-600 focus:text-white focus:font-bold focus:text-xs focus:rounded-xl focus:shadow-lg"
+      >
+        Pular para o conteúdo principal
+      </a>
+
       {/* Toast Notification */}
       {toastMessage && (
-        <div className="fixed top-5 right-5 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg animate-fadeIn flex items-center gap-2">
+        <div
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="fixed top-5 right-5 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg animate-fadeIn flex items-center gap-2"
+        >
           <span>{toastMessage}</span>
         </div>
       )}
@@ -390,6 +625,7 @@ export default function App() {
       <Sidebar
         currentTab={currentTab}
         isAdmin={user.role === 'Administrador'}
+        pendingAlertsCount={dynamicNotices.length}
         onSelectTab={(tab) => {
           if (tab === 'configuracoes') {
             setProfileEditing(false);
@@ -402,7 +638,7 @@ export default function App() {
 
       {/* Main Content Area */}
       <div className="flex-1 lg:pl-64 flex flex-col min-w-0">
-        <main className="flex-1 p-4 sm:p-8 max-w-7xl w-full mx-auto">
+        <main id="main-content" tabIndex={-1} className="flex-1 p-4 sm:p-8 max-w-7xl w-full mx-auto focus:outline-none">
           {/* Top User Bar */}
           <HeaderUser
             user={user}
@@ -417,7 +653,7 @@ export default function App() {
               members={members}
               extinguishers={extinguishers}
               inspections={inspections}
-              notices={notices}
+              notices={dynamicNotices}
               activityLogs={activityLogs}
               onNavigate={(tab) => setCurrentTab(tab)}
             />
@@ -430,6 +666,9 @@ export default function App() {
               onAddExtinguisher={handleAddExtinguisher}
               onUpdateExtinguisher={handleUpdateExtinguisher}
               onDeleteExtinguisher={handleDeleteExtinguisher}
+              onRequestSendAttentionEmail={(items) =>
+                void triggerAttentionAlert(items, true)
+              }
             />
           )}
 
@@ -497,6 +736,7 @@ export default function App() {
             <ReportsView
               user={user}
               extinguishers={extinguishers}
+              inspections={inspections}
               members={members}
               onReportGenerated={(filename, period) => {
                 logActivity(
@@ -510,8 +750,16 @@ export default function App() {
 
           {currentTab === 'avisos' && (
             <NoticesView
-              notices={notices}
+              notices={dynamicNotices}
+              extinguishers={extinguishers}
+              recipientEmails={registeredRecipientEmails}
+              serverAlertStatus={serverAlertStatus}
+              isSendingTest={isSendingTestEmail}
               onNavigate={(tab) => setCurrentTab(tab)}
+              onOpenAttentionEmailModal={(items) =>
+                void triggerAttentionAlert(items, true)
+              }
+              onSendTestEmail={handleSendTestEmail}
             />
           )}
 
@@ -521,6 +769,7 @@ export default function App() {
               user={user}
               onUpdateUser={handleUpdateUser}
               onLogout={handleLogout}
+              onShowToast={showToast}
               initialEditing={profileEditing}
             />
           )}
@@ -534,10 +783,30 @@ export default function App() {
               }}
               onLogout={handleLogout}
               onUpdateUser={handleUpdateUser}
+              onShowToast={showToast}
             />
           )}
         </main>
       </div>
+
+      {/* Gmail Confirmation Modal for Extinguishers in Atenção */}
+      <AttentionEmailConfirmModal
+        isOpen={attentionEmailTargets.length > 0}
+        extinguishers={attentionEmailTargets}
+        recipientEmails={registeredRecipientEmails}
+        user={user}
+        onClose={() => setAttentionEmailTargets([])}
+        onEmailSent={(count, codes, recipients) => {
+          showToast(
+            `E-mail de alerta enviado para ${recipients.length} destinatário(s) do banco!`
+          );
+          logActivity(
+            'Sistema',
+            'system',
+            `${user.name} enviou alerta por e-mail para ${recipients.join(', ')} referente a ${count} extintor(es) em Atenção (${codes.join(', ')})`
+          );
+        }}
+      />
     </div>
   );
 }

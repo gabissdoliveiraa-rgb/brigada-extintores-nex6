@@ -10,7 +10,12 @@ import {
   ExtinguisherType,
   UserProfile,
 } from '../types/brigada';
-import { canPerformAdminAction } from '../utils/brigadaLogic';
+import {
+  canPerformAdminAction,
+  computeStatusFromValidity,
+  filterExtinguishersByFloor,
+  getDaysUntilDate,
+} from '../utils/brigadaLogic';
 import { formatDate, validateDate } from '../utils/maskUtils';
 import { ExtinguisherIcon } from './ExtinguisherIcon';
 import { QrCameraScanner } from './QrCameraScanner';
@@ -22,14 +27,14 @@ import {
   Trash2,
   ArrowLeft,
   QrCode,
-  Camera,
   Maximize2,
   Minimize2,
   CheckCircle2,
   Eye,
   Layers,
   AlertTriangle,
-  Sparkles,
+  Mail,
+  Search,
 } from 'lucide-react';
 
 interface ExtinguishersViewProps {
@@ -38,6 +43,7 @@ interface ExtinguishersViewProps {
   onAddExtinguisher: (newExt: Extinguisher) => void;
   onUpdateExtinguisher: (updated: Extinguisher) => void;
   onDeleteExtinguisher: (id: string) => void;
+  onRequestSendAttentionEmail?: (items: Extinguisher[]) => void;
 }
 
 const FLOORS = [
@@ -151,10 +157,13 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
   onAddExtinguisher,
   onUpdateExtinguisher,
   onDeleteExtinguisher,
+  onRequestSendAttentionEmail,
 }) => {
   const isAdmin = canPerformAdminAction(user.role);
 
   const [selectedFloor, setSelectedFloor] = useState<FloorFilterType>('Todos');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'Todos' | ExtinguisherStatus>('Todos');
 
   const [viewMode, setViewMode] = useState<
     'list' | 'create' | 'edit' | 'qr_scan'
@@ -180,32 +189,69 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
   const [formCapacity, setFormCapacity] = useState('6kg');
   const [formStatus, setFormStatus] = useState<ExtinguisherStatus>('Em dia');
   const [formPurchaseDate, setFormPurchaseDate] = useState('');
+  const [formExpirationDate, setFormExpirationDate] = useState('');
+  const [formNextInspectionDate, setFormNextInspectionDate] = useState('');
   const [formNotes, setFormNotes] = useState('');
   const [formFloor, setFormFloor] = useState<FormFloorType>('Térreo - Recepção e Portaria');
 
-  const filteredExtinguishers = useMemo(() => {
-    if (selectedFloor === 'Todos') {
-      return extinguishers;
+  const formatOffsetDate = (daysOffset: number): string => {
+    const d = new Date();
+    d.setDate(d.getDate() + daysOffset);
+    return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+  };
+
+  const handleExpirationChange = (raw: string) => {
+    const formatted = formatDate(raw);
+    setFormExpirationDate(formatted);
+    if (validateDate(formatted) || validateDate(formNextInspectionDate)) {
+      setFormStatus(computeStatusFromValidity(formatted, formNextInspectionDate));
     }
-    return extinguishers.filter((e) => {
-      if (e.floor === selectedFloor) return true;
-      if (
-        selectedFloor === 'Térreo - Recepção e Portaria' &&
-        (e.floor === 'Térreo' || e.floor === 'Térreo - Recepção e Portaria')
-      ) {
-        const loc = (e.location || '').toLowerCase();
-        return loc.includes('portaria') || loc.includes('recepção') || loc.includes('saguão') || loc.includes('quadra');
+  };
+
+  const handleNextInspectionChange = (raw: string) => {
+    const formatted = formatDate(raw);
+    setFormNextInspectionDate(formatted);
+    if (validateDate(formExpirationDate) || validateDate(formatted)) {
+      setFormStatus(computeStatusFromValidity(formExpirationDate, formatted));
+    }
+  };
+
+  const handleFormStatusChange = (newStatus: ExtinguisherStatus) => {
+    setFormStatus(newStatus);
+    const derived = computeStatusFromValidity(formExpirationDate, formNextInspectionDate);
+    if (derived !== newStatus) {
+      if (newStatus === 'Em dia') {
+        setFormNextInspectionDate(formatOffsetDate(365));
+        const expDays = getDaysUntilDate(formExpirationDate);
+        if (expDays !== null && expDays <= 30) {
+          setFormExpirationDate(formatOffsetDate(1825));
+        }
+      } else if (newStatus === 'Atenção') {
+        setFormNextInspectionDate(formatOffsetDate(15));
+        const expDays = getDaysUntilDate(formExpirationDate);
+        if (expDays !== null && expDays < 0) {
+          setFormExpirationDate(formatOffsetDate(15));
+        }
+      } else if (newStatus === 'Vencido') {
+        setFormNextInspectionDate(formatOffsetDate(-1));
       }
-      if (
-        selectedFloor === 'Térreo - Cantina e Oficinas' &&
-        (e.floor === 'Térreo' || e.floor === 'Térreo - Cantina e Oficinas')
-      ) {
-        const loc = (e.location || '').toLowerCase();
-        return !(loc.includes('portaria') || loc.includes('recepção') || loc.includes('saguão') || loc.includes('quadra'));
-      }
-      return false;
+    }
+  };
+
+  const filteredExtinguishers = useMemo(() => {
+    const byFloor = filterExtinguishersByFloor(extinguishers, selectedFloor);
+    const q = searchQuery.trim().toLowerCase();
+    return byFloor.filter((e) => {
+      const matchesStatus = statusFilter === 'Todos' || e.status === statusFilter;
+      const matchesSearch =
+        !q ||
+        e.code.toLowerCase().includes(q) ||
+        e.location.toLowerCase().includes(q) ||
+        e.type.toLowerCase().includes(q) ||
+        e.floor.toLowerCase().includes(q);
+      return matchesStatus && matchesSearch;
     });
-  }, [extinguishers, selectedFloor]);
+  }, [extinguishers, selectedFloor, statusFilter, searchQuery]);
 
   const pinPositions = useMemo(() => {
     if (selectedFloor === 'Todos') return [];
@@ -218,7 +264,9 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
     setFormLocation('');
     setFormCapacity('6kg');
     setFormStatus('Em dia');
-    setFormPurchaseDate('');
+    setFormPurchaseDate(formatOffsetDate(0));
+    setFormExpirationDate(formatOffsetDate(1825));
+    setFormNextInspectionDate(formatOffsetDate(365));
     setFormNotes('');
     setFormFloor(selectedFloor === 'Todos' ? 'Térreo - Recepção e Portaria' : (selectedFloor as FormFloorType));
     setQrScanBanner(null);
@@ -227,13 +275,19 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
   };
 
   const handleStartEdit = (ext: Extinguisher) => {
+    const effective =
+      validateDate(ext.expirationDate || '') || validateDate(ext.nextInspectionDate || '')
+        ? computeStatusFromValidity(ext.expirationDate, ext.nextInspectionDate)
+        : ext.status;
     setActiveExtinguisher(ext);
     setFormCode(ext.code);
     setFormType(ext.type);
     setFormLocation(ext.location);
     setFormCapacity(ext.capacity);
-    setFormStatus(ext.status);
+    setFormStatus(effective);
     setFormPurchaseDate(ext.purchaseDate || '10/01/2024');
+    setFormExpirationDate(ext.expirationDate || '');
+    setFormNextInspectionDate(ext.nextInspectionDate || '');
     setFormNotes(ext.notes || '');
     setFormFloor(toFormFloor(ext.floor));
     setViewMode('edit');
@@ -243,6 +297,11 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
     e.preventDefault();
     if (!formCode.trim()) return;
 
+    const computedStatus =
+      validateDate(formExpirationDate) || validateDate(formNextInspectionDate)
+        ? computeStatusFromValidity(formExpirationDate, formNextInspectionDate)
+        : formStatus;
+
     const newExt: Extinguisher = {
       id: `ext_${Date.now()}`,
       code: formCode.trim(),
@@ -250,8 +309,10 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
       location: formLocation.trim() || 'Área Principal',
       floor: formFloor,
       capacity: formCapacity.trim() || '6kg',
-      status: formStatus,
+      status: computedStatus,
       purchaseDate: formPurchaseDate || new Date().toLocaleDateString('pt-BR'),
+      expirationDate: formExpirationDate || undefined,
+      nextInspectionDate: formNextInspectionDate || undefined,
       notes: formNotes,
       qrCode: `SENAI-EXT-${formCode.trim()}`,
       x: 18 + Math.floor(Math.random() * 64),
@@ -267,6 +328,11 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
     e.preventDefault();
     if (!activeExtinguisher) return;
 
+    const computedStatus =
+      validateDate(formExpirationDate) || validateDate(formNextInspectionDate)
+        ? computeStatusFromValidity(formExpirationDate, formNextInspectionDate)
+        : formStatus;
+
     const updated: Extinguisher = {
       ...activeExtinguisher,
       code: formCode,
@@ -274,9 +340,11 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
       location: formLocation,
       floor: formFloor,
       capacity: formCapacity,
-      status: formStatus,
+      status: computedStatus,
       notes: formNotes,
       purchaseDate: formPurchaseDate,
+      expirationDate: formExpirationDate || undefined,
+      nextInspectionDate: formNextInspectionDate || undefined,
       qrCode: activeExtinguisher.qrCode || `SENAI-EXT-${formCode.trim()}`,
     };
 
@@ -431,7 +499,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
                     }
                     className="w-full px-4 py-3 text-sm bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 text-slate-900"
                   >
-                    {FLOORS.map((fl) => (
+                    {FORM_FLOORS.map((fl) => (
                       <option key={fl} value={fl}>
                         {fl}
                       </option>
@@ -455,27 +523,67 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
 
               {/* Right Column */}
               <div className="space-y-6">
-                <div>
-                  <label className="block text-sm font-semibold text-slate-800 mb-2">
-                    Data da compra
-                  </label>
-                  <input
-                    type="text"
-                    maxLength={10}
-                    value={formPurchaseDate}
-                    onChange={(e) => setFormPurchaseDate(formatDate(e.target.value))}
-                    placeholder="DD/MM/AAAA"
-                    className={`w-full px-4 py-3 text-sm bg-white border rounded-xl focus:outline-none focus:ring-2 placeholder:text-slate-400 text-slate-900 ${
-                      formPurchaseDate && !validateDate(formPurchaseDate)
-                        ? 'border-red-400 focus:ring-red-500'
-                        : 'border-slate-300 focus:ring-red-500'
-                    }`}
-                  />
-                  {formPurchaseDate && !validateDate(formPurchaseDate) && (
-                    <p className="text-xs text-red-600 mt-1.5 font-medium">
-                      Data inválida (formato DD/MM/AAAA)
-                    </p>
-                  )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      Data da compra
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={10}
+                      value={formPurchaseDate}
+                      onChange={(e) => setFormPurchaseDate(formatDate(e.target.value))}
+                      placeholder="DD/MM/AAAA"
+                      className={`w-full px-4 py-3 text-sm bg-white border rounded-xl focus:outline-none focus:ring-2 placeholder:text-slate-400 text-slate-900 ${
+                        formPurchaseDate && !validateDate(formPurchaseDate)
+                          ? 'border-red-400 focus:ring-red-500'
+                          : 'border-slate-300 focus:ring-red-500'
+                      }`}
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      Data de Validade
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={10}
+                      value={formExpirationDate}
+                      onChange={(e) => handleExpirationChange(e.target.value)}
+                      placeholder="DD/MM/AAAA"
+                      className="w-full px-4 py-3 text-sm bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 font-mono text-slate-900"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      Próxima Inspeção
+                    </label>
+                    <input
+                      type="text"
+                      maxLength={10}
+                      value={formNextInspectionDate}
+                      onChange={(e) => handleNextInspectionChange(e.target.value)}
+                      placeholder="DD/MM/AAAA"
+                      className="w-full px-4 py-3 text-sm bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 font-mono text-slate-900"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-semibold text-slate-800 mb-2">
+                      Status (pela validade)
+                    </label>
+                    <select
+                      value={formStatus}
+                      onChange={(e) => handleFormStatusChange(e.target.value as ExtinguisherStatus)}
+                      className="w-full px-4 py-3 text-sm bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 text-slate-900"
+                    >
+                      <option value="Em dia">Em dia</option>
+                      <option value="Atenção">Atenção</option>
+                      <option value="Vencido">Vencido</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div>
@@ -483,7 +591,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
                     Observações
                   </label>
                   <textarea
-                    rows={8}
+                    rows={5}
                     value={formNotes}
                     onChange={(e) => setFormNotes(e.target.value)}
                     placeholder="Digite algumas observações...."
@@ -599,7 +707,15 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
 
               <div className="text-right">
                 <span className="text-xs text-slate-500 block mb-1">Status</span>
-                <span className="inline-block px-4 py-1 text-xs font-semibold rounded-md border border-emerald-400 text-emerald-700 bg-emerald-50/50">
+                <span
+                  className={`inline-block px-4 py-1 text-xs font-semibold rounded-md border ${
+                    formStatus === 'Em dia'
+                      ? 'border-emerald-400 text-emerald-700 bg-emerald-50/50'
+                      : formStatus === 'Atenção'
+                      ? 'border-amber-400 text-amber-700 bg-amber-50/50'
+                      : 'border-red-400 text-red-700 bg-red-50/50'
+                  }`}
+                >
                   {formStatus}
                 </span>
               </div>
@@ -692,12 +808,40 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
 
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                    Status
+                    Data de Validade
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={10}
+                    value={formExpirationDate}
+                    onChange={(e) => handleExpirationChange(e.target.value)}
+                    placeholder="DD/MM/AAAA"
+                    className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    Próxima Inspeção
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={10}
+                    value={formNextInspectionDate}
+                    onChange={(e) => handleNextInspectionChange(e.target.value)}
+                    placeholder="DD/MM/AAAA"
+                    className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+                    Status (pela validade)
                   </label>
                   <select
                     value={formStatus}
                     onChange={(e) =>
-                      setFormStatus(e.target.value as ExtinguisherStatus)
+                      handleFormStatusChange(e.target.value as ExtinguisherStatus)
                     }
                     className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                   >
@@ -718,7 +862,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
                     }
                     className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                   >
-                    {FLOORS.map((fl) => (
+                    {FORM_FLOORS.map((fl) => (
                       <option key={fl} value={fl}>
                         {fl}
                       </option>
@@ -773,7 +917,26 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
               </span>
             </div>
 
-            <div className="flex items-center gap-2.5">
+            <div className="flex flex-wrap items-center gap-2.5">
+              {onRequestSendAttentionEmail &&
+                extinguishers.some((e) => e.status === 'Atenção') && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      onRequestSendAttentionEmail(
+                        extinguishers.filter((e) => e.status === 'Atenção')
+                      )
+                    }
+                    className="flex items-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-600 active:scale-95 text-white font-bold rounded-xl text-xs tracking-wide transition-all shadow-sm cursor-pointer"
+                    title="Enviar alerta por e-mail para os e-mails cadastrados no banco de dados"
+                  >
+                    <Mail className="w-4 h-4" />
+                    <span>
+                      Alertar E-mail ({extinguishers.filter((e) => e.status === 'Atenção').length} em Atenção)
+                    </span>
+                  </button>
+                )}
+
               <button
                 type="button"
                 onClick={() => {
@@ -813,10 +976,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
             <div className="flex flex-wrap gap-2">
               {FLOORS.map((floor) => {
                 const isSelected = selectedFloor === floor;
-                const count =
-                  floor === 'Todos'
-                    ? extinguishers.length
-                    : extinguishers.filter((e) => e.floor === floor).length;
+                const count = filterExtinguishersByFloor(extinguishers, floor).length;
                 return (
                   <button
                     key={floor}
@@ -843,6 +1003,37 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
                   </button>
                 );
               })}
+            </div>
+          </div>
+
+          {/* Search & Status Filter Bar */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="relative flex-1 max-w-md">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Buscar por código, local ou tipo..."
+                className="w-full pl-10 pr-4 py-2 text-xs bg-white border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-red-500 text-slate-900"
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-1.5">
+              {(['Todos', 'Em dia', 'Atenção', 'Vencido'] as const).map((st) => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => setStatusFilter(st)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                    statusFilter === st
+                      ? 'bg-slate-900 text-white shadow-xs'
+                      : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {st}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -992,13 +1183,14 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
               <table className="w-full text-left text-sm">
                 <thead>
                   <tr className="border-b border-slate-200 text-slate-900 font-bold text-sm">
-                    <th className="pb-4 px-3 font-semibold">Codigo</th>
+                    <th className="pb-4 px-3 font-semibold">Código</th>
                     <th className="pb-4 px-3 font-semibold">Tipo</th>
                     {selectedFloor === 'Todos' && (
                       <th className="pb-4 px-3 font-semibold">Andar</th>
                     )}
                     <th className="pb-4 px-3 font-semibold">Local</th>
                     <th className="pb-4 px-3 font-semibold">Capacidade</th>
+                    <th className="pb-4 px-3 font-semibold">Próx. Insp. / Val.</th>
                     <th className="pb-4 px-3 font-semibold">Status</th>
                     <th className="pb-4 px-3 font-semibold text-center">QR Code</th>
                     <th className="pb-4 px-3 font-semibold text-right">Ações</th>
@@ -1008,10 +1200,23 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
                   {filteredExtinguishers.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={selectedFloor === 'Todos' ? 8 : 7}
+                        colSpan={selectedFloor === 'Todos' ? 9 : 8}
                         className="py-8 text-center text-xs text-slate-400"
                       >
-                        Nenhum extintor encontrado.
+                        <p>Nenhum extintor encontrado com os filtros atuais.</p>
+                        {(searchQuery || statusFilter !== 'Todos' || selectedFloor !== 'Todos') && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSearchQuery('');
+                              setStatusFilter('Todos');
+                              setSelectedFloor('Todos');
+                            }}
+                            className="mt-2 text-red-600 font-semibold hover:underline cursor-pointer"
+                          >
+                            Limpar filtros
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ) : (
@@ -1043,6 +1248,9 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
                         </td>
                         <td className="py-3.5 px-3 text-slate-700">
                           {ext.capacity}
+                        </td>
+                        <td className="py-3.5 px-3 font-mono text-xs text-slate-600 tabular-nums">
+                          {ext.nextInspectionDate || ext.expirationDate || '-'}
                         </td>
                         <td className="py-3.5 px-3">
                           <span

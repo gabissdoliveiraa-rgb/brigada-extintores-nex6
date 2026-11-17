@@ -67,7 +67,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
 
     // Check password
     const userPass = matchedUser.password || 'senai123';
-    if (password !== userPass && password !== 'senai123') {
+    if (password !== userPass) {
       setErrorMessage('Senha incorreta.');
       return;
     }

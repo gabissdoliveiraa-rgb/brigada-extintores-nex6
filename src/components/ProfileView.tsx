@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useRef } from 'react';
+import React, { useRef, useState } from 'react';
 import { UserProfile } from '../types/brigada';
 import {
   User,
@@ -20,6 +20,7 @@ interface ProfileViewProps {
   onOpenEdit: () => void;
   onLogout: () => void;
   onUpdateUser: (updated: UserProfile) => void;
+  onShowToast?: (message: string) => void;
 }
 
 export const ProfileView: React.FC<ProfileViewProps> = ({
@@ -27,18 +28,24 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   onOpenEdit,
   onLogout,
   onUpdateUser,
+  onShowToast,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [photoError, setPhotoError] = useState<string | null>(null);
 
   const handlePhotoSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (!file.type.startsWith('image/')) {
-      alert('Por favor, selecione um arquivo de imagem.');
+      const msg = 'Por favor, selecione um arquivo de imagem válido.';
+      setPhotoError(msg);
+      onShowToast?.(msg);
+      if (fileInputRef.current) fileInputRef.current.value = '';
       return;
     }
 
+    setPhotoError(null);
     const reader = new FileReader();
     reader.onload = (event) => {
       const base64 = event.target?.result as string;
@@ -52,6 +59,7 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
   };
 
   const handleRemovePhoto = () => {
+    setPhotoError(null);
     onUpdateUser({
       ...user,
       avatarUrl: undefined,
@@ -120,6 +128,12 @@ export const ProfileView: React.FC<ProfileViewProps> = ({
               <Trash2 className="w-3 h-3" />
               <span>Remover foto</span>
             </button>
+          )}
+
+          {photoError && (
+            <p className="mt-2 text-xs text-red-600 font-medium">
+              {photoError}
+            </p>
           )}
 
           {/* Name */}

@@ -17,6 +17,20 @@
   <body class="bg-slate-50 text-slate-900 antialiased font-sans selection:bg-indigo-500 selection:text-white">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
+
+    <!-- VLibras - Ferramenta oficial do Governo Federal para tradução em Libras -->
+    <div vw class="enabled">
+      <div vw-access-button class="active"></div>
+      <div vw-plugin-wrapper>
+        <div class="vw-plugin-top-wrapper"></div>
+      </div>
+    </div>
+    <script src="https://vlibras.gov.br/app/vlibras-plugin.js"></script>
+    <script>
+      if (window.VLibras && window.VLibras.Widget) {
+        new window.VLibras.Widget('https://vlibras.gov.br/app');
+      }
+    </script>
   </body>
 </html>
 

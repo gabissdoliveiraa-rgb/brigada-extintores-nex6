@@ -14,6 +14,7 @@ import {
   X,
   Database,
   History,
+  Bell,
 } from 'lucide-react';
 import { SenaiLogo } from './SenaiLogo';
 import { ExtinguisherIcon } from './ExtinguisherIcon';
@@ -36,6 +37,7 @@ interface SidebarProps {
   mobileOpen: boolean;
   onToggleMobile: () => void;
   isAdmin?: boolean;
+  pendingAlertsCount?: number;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -44,8 +46,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
   mobileOpen,
   onToggleMobile,
   isAdmin = false,
+  pendingAlertsCount = 0,
 }) => {
-  const menuItems: { id: ViewTab; label: string; icon: React.ReactNode }[] = [
+  const menuItems: {
+    id: ViewTab;
+    label: string;
+    icon: React.ReactNode;
+    badge?: number;
+  }[] = [
     {
       id: 'inicio',
       label: 'Início',
@@ -60,6 +68,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
       id: 'inspecoes',
       label: 'Inspeções',
       icon: <ClipboardList className="w-5 h-5 shrink-0" />,
+    },
+    {
+      id: 'avisos',
+      label: 'Avisos',
+      icon: <Bell className="w-5 h-5 shrink-0" />,
+      badge: pendingAlertsCount > 0 ? pendingAlertsCount : undefined,
     },
     {
       id: 'equipe',
@@ -133,9 +147,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Navigation Links */}
           <nav className="space-y-1.5" aria-label="Navegação Principal">
             {menuItems.map((item) => {
-              const isActive =
-                currentTab === item.id ||
-                (item.id === 'inicio' && currentTab === 'avisos');
+              const isActive = currentTab === item.id;
               return (
                 <button
                   key={item.id}
@@ -143,22 +155,35 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     onSelectTab(item.id);
                     if (mobileOpen) onToggleMobile();
                   }}
-                  className={`w-full flex items-center gap-3.5 px-4 py-3 rounded-xl text-sm font-medium transition-colors text-left ${
+                  className={`w-full flex items-center justify-between gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-colors text-left ${
                     isActive
                       ? 'text-red-600 font-semibold bg-red-50/70'
                       : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100/70'
                   }`}
                 >
-                  <span
-                    className={
-                      isActive
-                        ? 'text-red-600'
-                        : 'text-slate-500 group-hover:text-slate-700'
-                    }
-                  >
-                    {item.icon}
-                  </span>
-                  <span>{item.label}</span>
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <span
+                      className={
+                        isActive
+                          ? 'text-red-600'
+                          : 'text-slate-500 group-hover:text-slate-700'
+                      }
+                    >
+                      {item.icon}
+                    </span>
+                    <span className="truncate">{item.label}</span>
+                  </div>
+                  {item.badge !== undefined && (
+                    <span
+                      className={`px-2 py-0.5 text-[11px] font-bold rounded-full tabular-nums shrink-0 ${
+                        isActive
+                          ? 'bg-red-600 text-white'
+                          : 'bg-amber-100 text-amber-800 border border-amber-200'
+                      }`}
+                    >
+                      {item.badge}
+                    </span>
+                  )}
                 </button>
               );
             })}

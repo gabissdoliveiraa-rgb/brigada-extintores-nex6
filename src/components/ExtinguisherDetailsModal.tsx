@@ -97,7 +97,7 @@ export const ExtinguisherDetailsModal: React.FC<
             <div className="p-3 bg-red-50 border border-red-100 rounded-xl flex items-center gap-2.5 text-xs text-red-700">
               <Sparkles className="w-4 h-4 text-red-600 shrink-0" />
               <span>
-                Extintor localizado via leitura de QR Code (Doc. RH 049).
+                Ficha do Extintor • Doc. RH 049
               </span>
             </div>
 
@@ -127,19 +127,29 @@ export const ExtinguisherDetailsModal: React.FC<
                 <span className="text-[11px] text-slate-500 block mb-1">
                   Data de Compra / Carga
                 </span>
-                <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                <span className="font-bold text-slate-800 flex items-center gap-1.5 font-mono">
                   <Calendar className="w-3.5 h-3.5 text-slate-500" />
-                  {extinguisher.purchaseDate || '11/02/2024'}
+                  {extinguisher.purchaseDate || '-'}
                 </span>
               </div>
 
               <div className="p-3 bg-slate-50 rounded-xl border border-slate-100">
                 <span className="text-[11px] text-slate-500 block mb-1">
+                  Data de Validade
+                </span>
+                <span className="font-bold text-slate-800 flex items-center gap-1.5 font-mono">
+                  <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                  {extinguisher.expirationDate || '-'}
+                </span>
+              </div>
+
+              <div className="col-span-2 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                <span className="text-[11px] text-slate-500 block mb-1">
                   Próxima Inspeção
                 </span>
-                <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                <span className="font-bold text-slate-800 flex items-center gap-1.5 font-mono">
                   <Clock className="w-3.5 h-3.5 text-slate-500" />
-                  {extinguisher.nextInspectionDate || '15/10/2026'}
+                  {extinguisher.nextInspectionDate || '-'}
                 </span>
               </div>
             </div>
