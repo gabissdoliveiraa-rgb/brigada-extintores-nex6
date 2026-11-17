@@ -42,6 +42,7 @@ const KEYS = {
   NOTICES: 'senai_db_notices_rh049',
   ACTIVITY_LOGS: 'senai_db_activity_logs_rh049',
   ACTIVITY_CLEARED: 'senai_db_logs_cleared_v1',
+  BRIGADE_USERS_BACKFILL: 'senai_brigade_users_backfill_v1',
 };
 
 // Subscriber listeners for real-time reactivity across devices
@@ -90,7 +91,7 @@ function saveToStorage<T>(key: string, data: T): void {
 
 // Sanitize Firestore Doc IDs (must match firestore.rules regex ^[a-zA-Z0-9_\-]+$)
 function sanitizeDocId(id: string): string {
-  return id.replace(/[^a-zA-Z0-9_\-]/g, '_');
+  return id.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 128);
 }
 
 async function replaceFirestoreCollection<T extends { id: string }>(
@@ -306,7 +307,82 @@ export const dbUsers = {
         u.name.toLowerCase() === clean
     );
   },
+  syncFromBrigadeMembers: (members: BrigadeMember[]): RegisteredUser[] => {
+    const currentUsers = dbUsers.getAll();
+    const existingEmails = new Set(
+      currentUsers.map((u) => (u.email || '').trim().toLowerCase()).filter(Boolean)
+    );
+    const existingIds = new Set(currentUsers.map((u) => sanitizeDocId(u.id)));
+    const added: RegisteredUser[] = [];
+    const today = new Date().toLocaleDateString('pt-BR');
+
+    members.forEach((member, idx) => {
+      const cleanEmail = (member.email || '').trim();
+      if (!cleanEmail || !cleanEmail.includes('@')) return;
+      const lowerEmail = cleanEmail.toLowerCase();
+      if (existingEmails.has(lowerEmail)) return;
+
+      let candidateId = sanitizeDocId(`usr_${member.id || `brig_${Date.now()}_${idx}`}`);
+      if (existingIds.has(candidateId)) {
+        candidateId = sanitizeDocId(`usr_brig_${Date.now()}_${idx}`);
+      }
+
+      const newUser: RegisteredUser = {
+        id: candidateId,
+        name: member.name,
+        role: 'Funcionário',
+        email: cleanEmail,
+        phone: member.phone || '',
+        responsibleSector: member.responsibleFloor || '1º andar',
+        isLeader: member.isLeader,
+        trainingStatus: member.trainingStatus,
+        password: 'senai123',
+        createdAt: today,
+      };
+
+      added.push(newUser);
+      existingEmails.add(lowerEmail);
+      existingIds.add(candidateId);
+    });
+
+    if (added.length === 0) return [];
+
+    const updated = [...currentUsers, ...added];
+    saveToStorage(KEYS.USERS, updated);
+    notify(listeners.users, updated);
+
+    if (db && typeof window !== 'undefined') {
+      try {
+        for (let i = 0; i < added.length; i += 400) {
+          const batch = writeBatch(db);
+          added.slice(i, i + 400).forEach((newUser) => {
+            batch.set(
+              doc(db!, 'users', sanitizeDocId(newUser.id)),
+              cleanForFirestore(newUser)
+            );
+          });
+          batch.commit().catch((err) =>
+            console.warn('Erro ao sincronizar brigadistas para usuários no Firestore:', err)
+          );
+        }
+      } catch (err) {
+        console.warn('Erro no batch de sincronização de brigadistas:', err);
+      }
+    }
+
+    return added;
+  },
 };
+
+export function hasDoneBrigadeUsersBackfill(): boolean {
+  if (typeof localStorage === 'undefined') return true;
+  return localStorage.getItem(KEYS.BRIGADE_USERS_BACKFILL) === '1';
+}
+
+export function markBrigadeUsersBackfillDone(): void {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(KEYS.BRIGADE_USERS_BACKFILL, '1');
+}
 
 // --- EXTINGUISHERS CRUD ---
 export const dbExtinguishers = {
@@ -713,6 +789,7 @@ export function importFullDatabase(backup: FullDatabaseBackup): boolean {
 
 export function resetDatabaseToInitial(): void {
   dbUsers.saveAll(INITIAL_USERS);
+  markBrigadeUsersBackfillDone();
   dbExtinguishers.saveAll(INITIAL_EXTINGUISHERS);
   dbInspections.saveAll(INITIAL_INSPECTIONS);
   dbBrigade.saveAll(INITIAL_BRIGADE_MEMBERS);
@@ -724,6 +801,10 @@ export function resetDatabaseToInitial(): void {
 let hasInitializedFirestore = false;
 
 export function initFirestoreRealtimeSync(): () => void {
+  if (!db && typeof window !== 'undefined' && !hasDoneBrigadeUsersBackfill()) {
+    dbUsers.syncFromBrigadeMembers(dbBrigade.getAll());
+    markBrigadeUsersBackfillDone();
+  }
   if (hasInitializedFirestore || !db || typeof window === 'undefined') {
     return () => {};
   }
@@ -765,6 +846,17 @@ export function initFirestoreRealtimeSync(): () => void {
     );
     unsubscribes.push(unsubExt);
 
+    let membersReady = false;
+    let usersReady = false;
+    let latestMembers: BrigadeMember[] = [];
+
+    const runOneTimeBrigadeUsersBackfill = () => {
+      if (!membersReady || !usersReady) return;
+      if (hasDoneBrigadeUsersBackfill()) return;
+      dbUsers.syncFromBrigadeMembers(latestMembers);
+      markBrigadeUsersBackfillDone();
+    };
+
     // 2. Sync Brigade Members
     const membersCol = collection(db, 'brigade_members');
     const unsubMembers = onSnapshot(
@@ -772,13 +864,17 @@ export function initFirestoreRealtimeSync(): () => void {
       (snapshot) => {
         if (snapshot.empty) {
           console.info('Firestore vazio: populando 12 membros oficiais da brigada...');
+          latestMembers = INITIAL_BRIGADE_MEMBERS;
           dbBrigade.saveAll(INITIAL_BRIGADE_MEMBERS);
         } else {
           const remoteList: BrigadeMember[] = [];
           snapshot.forEach((d) => remoteList.push(d.data() as BrigadeMember));
+          latestMembers = remoteList;
           saveToStorage(KEYS.MEMBERS, remoteList);
           notify(listeners.members, remoteList);
         }
+        membersReady = true;
+        runOneTimeBrigadeUsersBackfill();
       },
       (err) => console.warn('Aviso no listener do Firestore (brigade_members):', err)
     );
@@ -790,14 +886,17 @@ export function initFirestoreRealtimeSync(): () => void {
       usersCol,
       (snapshot) => {
         if (snapshot.empty) {
-          console.info('Firestore vazio: populando usuários oficiais (Melissa e João)...');
+          console.info('Firestore vazio: populando usuários oficiais e membros da brigada...');
           dbUsers.saveAll(INITIAL_USERS);
+          markBrigadeUsersBackfillDone();
         } else {
           const remoteList: RegisteredUser[] = [];
           snapshot.forEach((d) => remoteList.push(d.data() as RegisteredUser));
           saveToStorage(KEYS.USERS, remoteList);
           notify(listeners.users, remoteList);
         }
+        usersReady = true;
+        runOneTimeBrigadeUsersBackfill();
       },
       (err) => console.warn('Aviso no listener do Firestore (users):', err)
     );

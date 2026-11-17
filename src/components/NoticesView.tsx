@@ -24,10 +24,8 @@ interface NoticesViewProps {
   extinguishers?: Extinguisher[];
   recipientEmails?: string[];
   serverAlertStatus?: ServerAlertStatus;
-  isSendingTest?: boolean;
   onNavigate: (tab: ViewTab) => void;
   onOpenAttentionEmailModal?: (items: Extinguisher[]) => void;
-  onSendTestEmail?: () => Promise<void> | void;
 }
 
 export const NoticesView: React.FC<NoticesViewProps> = ({
@@ -35,10 +33,8 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
   extinguishers = [],
   recipientEmails = [],
   serverAlertStatus,
-  isSendingTest = false,
   onNavigate,
   onOpenAttentionEmailModal,
-  onSendTestEmail,
 }) => {
   const [filter, setFilter] = useState<'Todos' | 'Vencido' | 'A vencer'>('Todos');
   const [needsAuth, setNeedsAuth] = useState<boolean>(() => !getAccessToken());
@@ -180,18 +176,6 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
                 </button>
               </div>
             )
-          )}
-
-          {isAutoServerActive && onSendTestEmail && (
-            <button
-              type="button"
-              disabled={isSendingTest}
-              onClick={() => void onSendTestEmail()}
-              className="inline-flex items-center gap-2 px-3.5 py-2.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-60"
-            >
-              <Mail className="w-3.5 h-3.5 text-red-600" />
-              <span>{isSendingTest ? 'Enviando teste...' : 'Testar E-mail'}</span>
-            </button>
           )}
 
           {onOpenAttentionEmailModal && (

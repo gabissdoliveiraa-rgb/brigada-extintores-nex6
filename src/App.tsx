@@ -49,7 +49,6 @@ import {
   initAuth,
   markAttentionAlertsSent,
   sendAutomaticServerAttentionEmail,
-  sendTestServerEmail,
   syncSentAttentionMapWithCurrentExtinguishers,
 } from './services/gmailAlert';
 
@@ -123,7 +122,6 @@ export default function App() {
     provider: null,
     senderEmail: null,
   });
-  const [isSendingTestEmail, setIsSendingTestEmail] = useState(false);
   const isAutoSendingRef = useRef(false);
 
   const showToast = (msg: string) => {
@@ -479,6 +477,10 @@ export default function App() {
   const handleAddMember = (newMember: BrigadeMember) => {
     dbBrigade.create(newMember);
     setMembers(dbBrigade.getAll());
+    const syncedUsers = dbUsers.syncFromBrigadeMembers([newMember]);
+    if (syncedUsers.length > 0) {
+      setUsers(dbUsers.getAll());
+    }
     showToast(`Membro ${newMember.name} cadastrado na brigada!`);
     if (user) {
       logActivity(
@@ -557,38 +559,31 @@ export default function App() {
     showToast('Histórico de atividades limpo com sucesso.');
   };
 
+  const handleSyncBrigadeMembersToDb = () => {
+    const added = dbUsers.syncFromBrigadeMembers(members);
+    if (added.length > 0) {
+      setUsers(dbUsers.getAll());
+      showToast(
+        `${added.length} membro(s) da brigada adicionado(s) ao banco de e-mails!`
+      );
+      if (user) {
+        logActivity(
+          'Usuários',
+          'create',
+          `${user.name} sincronizou ${added.length} membro(s) da brigada para o banco de usuários`
+        );
+      }
+    } else {
+      showToast('Todos os membros da brigada já estão cadastrados no banco.');
+    }
+  };
+
   const registeredRecipientEmails = extractRegisteredRecipientEmails(users);
 
   const dynamicNotices = useMemo(
     () => buildDynamicNotices(extinguishers, inspections),
     [extinguishers, inspections]
   );
-
-  const handleSendTestEmail = async () => {
-    if (isSendingTestEmail) return;
-    setIsSendingTestEmail(true);
-    try {
-      const result = await sendTestServerEmail(
-        registeredRecipientEmails,
-        user?.name
-      );
-      if (result.success) {
-        const sentTo = result.recipients || registeredRecipientEmails;
-        showToast(
-          `E-mail de teste enviado para ${sentTo.length} destinatário(s)!`
-        );
-        logActivity(
-          'Sistema',
-          'system',
-          `${user?.name || 'Sistema'} enviou um e-mail de teste para ${sentTo.join(', ')}`
-        );
-      } else {
-        showToast(result.error || 'Falha ao enviar e-mail de teste.');
-      }
-    } finally {
-      setIsSendingTestEmail(false);
-    }
-  };
 
   // If not logged in, render the Auth screen
   if (!user) {
@@ -714,6 +709,7 @@ export default function App() {
                 onNavigateToBrigade={() => setCurrentTab('equipe')}
                 onImportBackup={handleImportBackup}
                 onResetDatabase={handleResetDatabase}
+                onSyncBrigadeMembers={handleSyncBrigadeMembersToDb}
                 onShowToast={showToast}
               />
             ) : (
@@ -754,12 +750,10 @@ export default function App() {
               extinguishers={extinguishers}
               recipientEmails={registeredRecipientEmails}
               serverAlertStatus={serverAlertStatus}
-              isSendingTest={isSendingTestEmail}
               onNavigate={(tab) => setCurrentTab(tab)}
               onOpenAttentionEmailModal={(items) =>
                 void triggerAttentionAlert(items, true)
               }
-              onSendTestEmail={handleSendTestEmail}
             />
           )}
 

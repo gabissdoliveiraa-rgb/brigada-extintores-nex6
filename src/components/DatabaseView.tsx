@@ -55,6 +55,7 @@ interface DatabaseViewProps {
   onNavigateToBrigade: () => void;
   onImportBackup: (backup: FullDatabaseBackup) => void;
   onResetDatabase: () => void;
+  onSyncBrigadeMembers?: () => void;
   onShowToast: (message: string) => void;
 }
 
@@ -72,6 +73,7 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
   onNavigateToBrigade,
   onImportBackup,
   onResetDatabase,
+  onSyncBrigadeMembers,
   onShowToast,
 }) => {
   const isAdmin = currentUser.role === 'Administrador';
@@ -114,6 +116,14 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
     const matchesRole = roleFilter === 'Todos' || u.role === roleFilter;
     return matchesSearch && matchesRole;
   });
+
+  const registeredUserEmails = new Set(
+    users.map((u) => (u.email || '').trim().toLowerCase()).filter(Boolean)
+  );
+  const missingBrigadeMembersCount = members.filter((m) => {
+    const email = (m.email || '').trim().toLowerCase();
+    return email.includes('@') && !registeredUserEmails.has(email);
+  }).length;
 
   const handleOpenAddUser = () => {
     setEditingUserId(null);
@@ -497,7 +507,7 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
             </div>
 
             {/* Filter buttons & Add User button */}
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <div className="flex bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-xs">
                 {(['Todos', 'Administrador', 'Funcionário'] as const).map((r) => (
                   <button
@@ -513,6 +523,17 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
                   </button>
                 ))}
               </div>
+
+              {isAdmin && missingBrigadeMembersCount > 0 && onSyncBrigadeMembers && (
+                <button
+                  onClick={onSyncBrigadeMembers}
+                  className="flex items-center gap-1.5 px-3.5 py-2 bg-white border border-slate-300 hover:border-red-300 hover:bg-red-50/50 text-slate-700 hover:text-red-700 font-semibold rounded-xl text-xs transition-colors shadow-xs"
+                  title="Adicionar membros da Equipe da Brigada que ainda não estão no banco de usuários"
+                >
+                  <Users className="w-4 h-4 text-red-600" />
+                  <span>Adicionar da Brigada ({missingBrigadeMembersCount})</span>
+                </button>
+              )}
 
               {isAdmin && (
                 <button

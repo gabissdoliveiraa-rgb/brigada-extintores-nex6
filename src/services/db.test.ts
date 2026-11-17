@@ -107,3 +107,43 @@ test('exportFullDatabase and importFullDatabase preserve data integrity', () => 
   assert.equal(success, true);
   assert.equal(dbExtinguishers.getAll().length, 123);
 });
+
+test('INITIAL_USERS includes all 12 brigade members and syncFromBrigadeMembers prevents duplicates', () => {
+  resetDatabaseToInitial();
+  const users = dbUsers.getAll();
+  const members = dbBrigade.getAll();
+  assert.equal(members.length, 12);
+
+  const userEmailSet = new Set(users.map((u) => u.email.toLowerCase()));
+  for (const m of members) {
+    assert.ok(
+      userEmailSet.has(m.email.toLowerCase()),
+      `Brigade member ${m.name} (${m.email}) should exist in INITIAL_USERS`
+    );
+  }
+
+  // Syncing already-present members should add 0 duplicates
+  const dupSync = dbUsers.syncFromBrigadeMembers(members);
+  assert.equal(dupSync.length, 0);
+
+  // Syncing a new custom brigade member adds 1 user with valid id
+  const added = dbUsers.syncFromBrigadeMembers([
+    ...members,
+    {
+      id: 'member_custom_99',
+      name: 'Novo Brigadista Teste',
+      role: 'Brigadista',
+      isLeader: false,
+      jobTitle: 'Técnico',
+      functionDescription: 'Teste',
+      phone: '(11) 91234-5678',
+      email: 'novobrigadista@senaisp.edu.br',
+      responsibleFloor: '4º andar',
+      trainingStatus: 'Em dia',
+      trainingExpirationDate: '10/12/2027',
+    },
+  ]);
+  assert.equal(added.length, 1);
+  assert.equal(added[0].id, 'usr_member_custom_99');
+  assert.ok(dbUsers.findByEmail('novobrigadista@senaisp.edu.br'));
+});

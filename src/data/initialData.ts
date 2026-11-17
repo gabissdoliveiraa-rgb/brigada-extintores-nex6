@@ -45,17 +45,6 @@ export const EMPLOYEE_USER: RegisteredUser = {
   createdAt: '05/01/2026',
 };
 
-export const INITIAL_USERS: RegisteredUser[] = [
-  ADMIN_USER,
-  EMPLOYEE_USER,
-];
-
-// 123 Extintores Oficiais do documento RH 049 - Anexo 2: Equipamentos e Sistema de Combate a Incêndio do SENAI
-export const INITIAL_EXTINGUISHERS: Extinguisher[] = OFFICIAL_SENAI_EXTINGUISHERS;
-
-// Inspeções associadas aos extintores oficiais do SENAI
-export const INITIAL_INSPECTIONS: Inspection[] = OFFICIAL_SENAI_INSPECTIONS;
-
 export const INITIAL_BRIGADE_MEMBERS: BrigadeMember[] = [
   {
     id: 'member_1',
@@ -214,6 +203,38 @@ export const INITIAL_BRIGADE_MEMBERS: BrigadeMember[] = [
     trainingExpirationDate: '30/08/2027',
   },
 ];
+
+const INITIAL_BASE_EMAILS = new Set([
+  ADMIN_USER.email.toLowerCase(),
+  EMPLOYEE_USER.email.toLowerCase(),
+]);
+
+const BRIGADE_AS_USERS: RegisteredUser[] = INITIAL_BRIGADE_MEMBERS.filter(
+  (m) => m.email && !INITIAL_BASE_EMAILS.has(m.email.toLowerCase())
+).map((m) => ({
+  id: `usr_${m.id}`,
+  name: m.name,
+  role: 'Funcionário',
+  email: m.email,
+  phone: m.phone,
+  responsibleSector: m.responsibleFloor,
+  isLeader: m.isLeader,
+  trainingStatus: m.trainingStatus,
+  password: 'senai123',
+  createdAt: '05/01/2026',
+}));
+
+export const INITIAL_USERS: RegisteredUser[] = [
+  ADMIN_USER,
+  EMPLOYEE_USER,
+  ...BRIGADE_AS_USERS,
+];
+
+// 123 Extintores Oficiais do documento RH 049 - Anexo 2: Equipamentos e Sistema de Combate a Incêndio do SENAI
+export const INITIAL_EXTINGUISHERS: Extinguisher[] = OFFICIAL_SENAI_EXTINGUISHERS;
+
+// Inspeções associadas aos extintores oficiais do SENAI
+export const INITIAL_INSPECTIONS: Inspection[] = OFFICIAL_SENAI_INSPECTIONS;
 
 export const INITIAL_NOTICES: Notice[] = [
   {

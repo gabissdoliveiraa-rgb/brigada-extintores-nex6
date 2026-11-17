@@ -383,60 +383,6 @@ export async function sendAutomaticServerAttentionEmail(
   }
 }
 
-export async function sendTestServerEmail(
-  recipientEmails: string[],
-  operatorName?: string
-): Promise<SendGmailAlertResult & { notConfigured?: boolean }> {
-  const validRecipients = extractRegisteredRecipientEmails(
-    recipientEmails.map((email) => ({ email }))
-  );
-
-  try {
-    const res = await fetch('/api/alerts/test', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        recipients: validRecipients,
-        operatorName,
-      }),
-    });
-
-    const data = (await res.json().catch(() => ({}))) as {
-      success?: boolean;
-      messageId?: string;
-      recipients?: string[];
-      notConfigured?: boolean;
-      error?: string;
-    };
-
-    if (!res.ok || !data.success) {
-      return {
-        success: false,
-        notConfigured: Boolean(data.notConfigured),
-        error:
-          data.error ||
-          `Falha ao enviar e-mail de teste pelo servidor (HTTP ${res.status}).`,
-      };
-    }
-
-    return {
-      success: true,
-      messageId: data.messageId,
-      recipients: data.recipients || validRecipients,
-    };
-  } catch (err) {
-    return {
-      success: false,
-      error:
-        err instanceof Error
-          ? err.message
-          : 'Erro de conexão com o servidor ao enviar e-mail de teste.',
-    };
-  }
-}
-
 const SENT_ALERTS_STORAGE_KEY = 'senai_auto_email_sent_v1';
 
 function buildExtinguisherAlertSignature(ext: Extinguisher): string {
