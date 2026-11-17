@@ -94,4 +94,23 @@ test('filterActivityLogs filters properly by category, user, and search keywords
   // All matches
   const allLogs = filterActivityLogs(sampleLogs, 'Todos', 'Todos', '');
   assert.equal(allLogs.length, 3);
+
+  // Sort oldest first
+  const oldestFirst = filterActivityLogs(sampleLogs, 'Todos', 'Todos', '', '', 'oldest');
+  assert.deepEqual(
+    oldestFirst.map((l) => l.id),
+    ['3', '2', '1']
+  );
+
+  // Sort most recent first
+  const recentFirst = filterActivityLogs(sampleLogs, 'Todos', 'Todos', '', '', 'recent');
+  assert.deepEqual(
+    recentFirst.map((l) => l.id),
+    ['1', '2', '3']
+  );
+
+  // Date filter (2026-03-11 matches only log id '3')
+  const march11 = filterActivityLogs(sampleLogs, 'Todos', 'Todos', '', '2026-03-11');
+  assert.equal(march11.length, 1);
+  assert.equal(march11[0].id, '3');
 });

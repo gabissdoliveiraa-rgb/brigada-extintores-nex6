@@ -313,6 +313,36 @@ export async function fetchServerAlertStatus(): Promise<ServerAlertStatus> {
   }
 }
 
+let inMemoryServerSessionToken: string | null = null;
+
+export async function establishServerSession(user: {
+  id: string;
+  email: string;
+  role: string;
+}): Promise<string | null> {
+  try {
+    const res = await fetch('/api/auth/session', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { token?: string };
+    inMemoryServerSessionToken = data.token || null;
+    return inMemoryServerSessionToken;
+  } catch {
+    return null;
+  }
+}
+
+export function clearServerSession(): void {
+  inMemoryServerSessionToken = null;
+}
+
 export async function sendAutomaticServerAttentionEmail(
   extinguishers: Extinguisher[],
   recipientEmails: string[],
@@ -338,11 +368,16 @@ export async function sendAutomaticServerAttentionEmail(
   }
 
   try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (inMemoryServerSessionToken) {
+      headers.Authorization = `Bearer ${inMemoryServerSessionToken}`;
+    }
+
     const res = await fetch('/api/alerts/send-attention', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers,
       body: JSON.stringify({
         extinguishers,
         recipients: validRecipients,

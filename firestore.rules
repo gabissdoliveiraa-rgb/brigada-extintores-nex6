@@ -1,43 +1,196 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Default catch-all deny
+    // Global default-deny safety net
     match /{document=**} {
       allow read, write: if false;
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isStrLen(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isOptStrLen(data, field, maxLen) {
+      return !(field in data) || (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    function isOptNum(data, field) {
+      return !(field in data) || (data[field] is int || data[field] is float);
+    }
+
+    function isValidExtinguisher(data) {
+      return data.keys().hasAll(['id', 'code', 'type', 'location', 'floor', 'capacity', 'status'])
+        && data.keys().hasOnly([
+          'id', 'code', 'type', 'location', 'floor', 'capacity', 'status',
+          'purchaseDate', 'expirationDate', 'validityDate', 'nextInspectionDate',
+          'notes', 'qrCode', 'x', 'y', 'lastInspectedAt'
+        ])
+        && isStrLen(data.id, 1, 128)
+        && isStrLen(data.code, 1, 40)
+        && data.type in ['Pó Químico ABC', 'CO2', 'Água', 'Espuma Mecânica']
+        && isStrLen(data.location, 1, 160)
+        && isStrLen(data.floor, 1, 80)
+        && isStrLen(data.capacity, 1, 40)
+        && data.status in ['Em dia', 'Atenção', 'Vencido']
+        && isOptStrLen(data, 'purchaseDate', 40)
+        && isOptStrLen(data, 'expirationDate', 40)
+        && isOptStrLen(data, 'validityDate', 40)
+        && isOptStrLen(data, 'nextInspectionDate', 40)
+        && isOptStrLen(data, 'notes', 1000)
+        && isOptStrLen(data, 'qrCode', 120)
+        && isOptStrLen(data, 'lastInspectedAt', 60)
+        && isOptNum(data, 'x')
+        && isOptNum(data, 'y');
+    }
+
+    function isValidBrigadeMember(data) {
+      return data.keys().hasAll(['id', 'name', 'role', 'isLeader', 'email', 'responsibleFloor', 'trainingStatus'])
+        && data.keys().hasOnly([
+          'id', 'name', 'role', 'isLeader', 'jobTitle', 'functionDescription',
+          'phone', 'email', 'responsibleFloor', 'trainingStatus',
+          'trainingExpirationDate', 'avatarUrl'
+        ])
+        && isStrLen(data.id, 1, 128)
+        && isStrLen(data.name, 1, 120)
+        && isStrLen(data.role, 1, 80)
+        && data.isLeader is bool
+        && isOptStrLen(data, 'jobTitle', 120)
+        && isOptStrLen(data, 'functionDescription', 500)
+        && isOptStrLen(data, 'phone', 30)
+        && isStrLen(data.email, 3, 160)
+        && isStrLen(data.responsibleFloor, 1, 80)
+        && data.trainingStatus in ['Em dia', 'Vencido']
+        && isOptStrLen(data, 'trainingExpirationDate', 40)
+        && isOptStrLen(data, 'avatarUrl', 800000);
+    }
+
+    function isValidInspection(data) {
+      return data.keys().hasAll(['id', 'extinguisherCode', 'date', 'responsible', 'status'])
+        && data.keys().hasOnly([
+          'id', 'code', 'extinguisherCode', 'extinguisherType', 'date',
+          'responsible', 'status', 'floor', 'location', 'capacity',
+          'validityDate', 'nextInspectionDate', 'notes'
+        ])
+        && isStrLen(data.id, 1, 128)
+        && isOptStrLen(data, 'code', 40)
+        && isStrLen(data.extinguisherCode, 1, 40)
+        && isOptStrLen(data, 'extinguisherType', 60)
+        && isStrLen(data.date, 1, 40)
+        && isStrLen(data.responsible, 1, 120)
+        && data.status in ['Em dia', 'Atenção', 'Vencido']
+        && isOptStrLen(data, 'floor', 80)
+        && isOptStrLen(data, 'location', 160)
+        && isOptStrLen(data, 'capacity', 40)
+        && isOptStrLen(data, 'validityDate', 40)
+        && isOptStrLen(data, 'nextInspectionDate', 40)
+        && isOptStrLen(data, 'notes', 1000);
+    }
+
+    function isValidNotice(data) {
+      return data.keys().hasAll(['id', 'type', 'description', 'date', 'status'])
+        && data.keys().hasOnly(['id', 'type', 'description', 'date', 'status', 'extinguisherCode'])
+        && isStrLen(data.id, 1, 128)
+        && isStrLen(data.type, 1, 80)
+        && isStrLen(data.description, 1, 500)
+        && isStrLen(data.date, 1, 40)
+        && data.status in ['Vencido', 'A vencer', 'Pendente']
+        && isOptStrLen(data, 'extinguisherCode', 40);
+    }
+
+    function isValidActivityLog(data) {
+      return data.keys().hasAll([
+          'id', 'userName', 'userRole', 'category', 'actionType',
+          'description', 'timestamp', 'formattedDateTime'
+        ])
+        && data.keys().hasOnly([
+          'id', 'userName', 'userRole', 'userEmail', 'category',
+          'actionType', 'description', 'timestamp', 'formattedDateTime',
+          'targetCode', 'targetFloor', 'details'
+        ])
+        && isStrLen(data.id, 1, 128)
+        && isStrLen(data.userName, 1, 120)
+        && data.userRole in ['Administrador', 'Funcionário']
+        && isOptStrLen(data, 'userEmail', 160)
+        && data.category in ['Extintores', 'Inspeções', 'Brigada', 'Relatórios', 'Usuários', 'Sistema']
+        && data.actionType in ['create', 'update', 'delete', 'inspect', 'report', 'login', 'system']
+        && isStrLen(data.description, 1, 1000)
+        && isStrLen(data.timestamp, 1, 60)
+        && isStrLen(data.formattedDateTime, 1, 60)
+        && isOptStrLen(data, 'targetCode', 40)
+        && isOptStrLen(data, 'targetFloor', 80)
+        && isOptStrLen(data, 'details', 1000);
+    }
+
+    function isValidRegisteredUser(data) {
+      return data.keys().hasAll(['id', 'name', 'role', 'email'])
+        && data.keys().hasOnly([
+          'id', 'name', 'role', 'email', 'phone', 'avatarUrl',
+          'responsibleSector', 'birthDate', 'isLeader',
+          'trainingStatus', 'password', 'createdAt'
+        ])
+        && isStrLen(data.id, 1, 128)
+        && isStrLen(data.name, 1, 120)
+        && data.role in ['Administrador', 'Funcionário']
+        && isStrLen(data.email, 3, 160)
+        && isOptStrLen(data, 'phone', 30)
+        && isOptStrLen(data, 'avatarUrl', 800000)
+        && isOptStrLen(data, 'responsibleSector', 80)
+        && isOptStrLen(data, 'birthDate', 30)
+        && (!('isLeader' in data) || data.isLeader is bool)
+        && (!('trainingStatus' in data) || data.trainingStatus in ['Em dia', 'Vencido'])
+        && isOptStrLen(data, 'password', 256)
+        && isOptStrLen(data, 'createdAt', 40);
     }
 
     match /extinguishers/{extinguisherId} {
-      allow read: if true;
-      allow write: if isValidId(extinguisherId);
+      allow get: if isValidId(extinguisherId);
+      allow list: if true;
+      allow create, update: if isValidId(extinguisherId) && isValidExtinguisher(incoming());
+      allow delete: if isValidId(extinguisherId);
     }
 
     match /brigade_members/{memberId} {
-      allow read: if true;
-      allow write: if isValidId(memberId);
+      allow get: if isValidId(memberId);
+      allow list: if true;
+      allow create, update: if isValidId(memberId) && isValidBrigadeMember(incoming());
+      allow delete: if isValidId(memberId);
     }
 
     match /inspections/{inspectionId} {
-      allow read: if true;
-      allow write: if isValidId(inspectionId);
+      allow get: if isValidId(inspectionId);
+      allow list: if true;
+      allow create, update: if isValidId(inspectionId) && isValidInspection(incoming());
+      allow delete: if isValidId(inspectionId);
     }
 
     match /notices/{noticeId} {
-      allow read: if true;
-      allow write: if isValidId(noticeId);
+      allow get: if isValidId(noticeId);
+      allow list: if true;
+      allow create, update: if isValidId(noticeId) && isValidNotice(incoming());
+      allow delete: if isValidId(noticeId);
     }
 
+    // Immutable append-only audit trail
     match /activity_logs/{logId} {
-      allow read: if true;
-      allow write: if isValidId(logId);
+      allow get: if isValidId(logId);
+      allow list: if true;
+      allow create: if isValidId(logId) && isValidActivityLog(incoming());
+      allow update, delete: if false;
     }
 
     match /users/{userId} {
-      allow read: if true;
-      allow write: if isValidId(userId);
+      allow get: if isValidId(userId);
+      allow list: if true;
+      allow create, update: if isValidId(userId) && isValidRegisteredUser(incoming());
+      allow delete: if isValidId(userId);
     }
   }
 }

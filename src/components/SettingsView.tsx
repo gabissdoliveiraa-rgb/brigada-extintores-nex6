@@ -25,9 +25,15 @@ import {
   validateName,
   SENAI_SECTOR_OPTIONS,
 } from '../utils/maskUtils';
+import {
+  hashPassword,
+  validatePasswordStrength,
+  verifyPassword,
+} from '../utils/security';
 
 interface SettingsViewProps {
   user: UserProfile;
+  storedPasswordHash?: string;
   onUpdateUser: (updated: UserProfile) => void;
   onLogout: () => void;
   onShowToast?: (message: string) => void;
@@ -36,6 +42,7 @@ interface SettingsViewProps {
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
   user,
+  storedPasswordHash,
   onUpdateUser,
   onLogout,
   onShowToast,
@@ -57,6 +64,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     user.birthDate || '27/07/2000'
   );
   const [avatarUrl, setAvatarUrl] = useState<string | undefined>(user.avatarUrl);
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPasswords, setShowPasswords] = useState(false);
@@ -173,7 +181,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setPhotoError(null);
   };
 
-  const handleSave = (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
 
     const nameCheck = validateName(editName);
@@ -182,11 +190,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const dateCheck = validateDate(editBirthDate);
 
     let passwordError: string | undefined;
+    let hashedNextPassword: string | undefined;
+
     if (newPassword || confirmPassword) {
-      if (newPassword.trim().length < 4) {
-        passwordError = 'A nova senha deve ter pelo menos 4 caracteres.';
-      } else if (newPassword !== confirmPassword) {
-        passwordError = 'A confirmação de senha não confere.';
+      if (!currentPassword.trim()) {
+        passwordError = 'Informe sua senha atual para definir uma nova senha.';
+      } else {
+        const currentCheck = await verifyPassword(
+          currentPassword,
+          storedPasswordHash || user.password
+        );
+        if (!currentCheck.valid) {
+          passwordError = 'A senha atual informada está incorreta.';
+        } else {
+          const strength = validatePasswordStrength(newPassword);
+          if (!strength.valid) {
+            passwordError = strength.error;
+          } else if (newPassword !== confirmPassword) {
+            passwordError = 'A confirmação de senha não confere.';
+          } else {
+            hashedNextPassword = await hashPassword(newPassword.trim());
+          }
+        }
       }
     }
 
@@ -214,8 +239,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       responsibleSector: editSector,
       birthDate: editBirthDate.trim(),
       avatarUrl,
-      password: newPassword.trim() ? newPassword.trim() : user.password,
+      password: hashedNextPassword || storedPasswordHash || user.password,
     });
+    setCurrentPassword('');
     setNewPassword('');
     setConfirmPassword('');
     setPhotoError(null);
@@ -478,10 +504,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     )}
                   </div>
 
+                  {/* Senha atual (obrigatória para alterar senha) */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Senha atual (obrigatória apenas para trocar a senha)
+                    </label>
+                    <input
+                      type={showPasswords ? 'text' : 'password'}
+                      value={currentPassword}
+                      onChange={(e) => {
+                        setCurrentPassword(e.target.value);
+                        setErrors((prev) => ({ ...prev, password: undefined }));
+                      }}
+                      placeholder="Digite sua senha atual para confirmar alteração"
+                      autoComplete="current-password"
+                      className="w-full px-3 py-2 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
+                    />
+                  </div>
+
                   {/* Alterar senha (opcional) */}
                   <div>
                     <label className="block text-xs font-semibold text-slate-700 mb-1">
-                      Nova senha (opcional)
+                      Nova senha (mín. 6 caracteres)
                     </label>
                     <div className="relative">
                       <input
@@ -544,6 +588,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     onClick={() => {
                       setIsEditing(false);
                       setErrors({});
+                      setCurrentPassword('');
                       setNewPassword('');
                       setConfirmPassword('');
                       setPhotoError(null);

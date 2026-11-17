@@ -43,14 +43,16 @@ import { HistoryView } from './components/HistoryView';
 import { AttentionEmailConfirmModal } from './components/AttentionEmailConfirmModal';
 import {
   ServerAlertStatus,
+  clearServerSession,
+  establishServerSession,
   extractRegisteredRecipientEmails,
   fetchServerAlertStatus,
-  getUnsentAttentionExtinguishers,
   initAuth,
   markAttentionAlertsSent,
   sendAutomaticServerAttentionEmail,
   syncSentAttentionMapWithCurrentExtinguishers,
 } from './services/gmailAlert';
+import { sanitizeUserForSession } from './utils/security';
 
 export default function App() {
   // Support ?autostart=1 query param from Ultra Mode
@@ -78,11 +80,10 @@ export default function App() {
   const [user, setUser] = useState<UserProfile | null>(() => {
     const currentDbUsers = dbUsers.getAll();
     if (isAutostart) {
-      return (
+      const admin =
         currentDbUsers.find((u) => u.role === 'Administrador') ||
-        currentDbUsers[0] ||
-        null
-      );
+        currentDbUsers[0];
+      return admin ? sanitizeUserForSession(admin) : null;
     }
     const saved = localStorage.getItem('senai_brigada_user');
     if (saved) {
@@ -95,7 +96,7 @@ export default function App() {
               u.email.toLowerCase() === parsed.email!.toLowerCase()
           );
           if (dbMatch) {
-            return { ...parsed, ...dbMatch };
+            return sanitizeUserForSession({ ...parsed, ...dbMatch });
           }
           localStorage.removeItem('senai_brigada_user');
         }
@@ -135,18 +136,55 @@ export default function App() {
     setCurrentTab('perfil');
   };
 
-  // Keep session user synchronized in localStorage
+  // Keep session user synchronized in localStorage (without credentials) and server token in memory
   useEffect(() => {
     if (user) {
-      localStorage.setItem('senai_brigada_user', JSON.stringify(user));
+      localStorage.setItem(
+        'senai_brigada_user',
+        JSON.stringify(sanitizeUserForSession(user))
+      );
+      void establishServerSession(user);
     } else {
       localStorage.removeItem('senai_brigada_user');
+      clearServerSession();
     }
   }, [user]);
+
+  // Automatic inactivity logout after 30 minutes for terminal security
+  useEffect(() => {
+    if (!user) return;
+    const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastReset = 0;
+
+    const resetTimer = () => {
+      const now = Date.now();
+      if (now - lastReset < 1000 && timer) return;
+      lastReset = now;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        setUser(null);
+        localStorage.removeItem('senai_brigada_user');
+        clearServerSession();
+        setCurrentTab('inicio');
+        showToast('Sessão encerrada por inatividade para sua segurança.');
+      }, INACTIVITY_TIMEOUT_MS);
+    };
+
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'] as const;
+    events.forEach((evt) => window.addEventListener(evt, resetTimer, { passive: true }));
+    resetTimer();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      events.forEach((evt) => window.removeEventListener(evt, resetTimer));
+    };
+  }, [user?.id]);
 
   // Real-time synchronization across devices via Firestore
   useEffect(() => {
     const cleanupFirestore = initFirestoreRealtimeSync();
+    void dbUsers.migrateLegacyPasswords();
 
     const unsubExt = dbExtinguishers.subscribe((data) => setExtinguishers(data));
     const unsubMembers = dbBrigade.subscribe((data) => setMembers(data));
@@ -161,7 +199,7 @@ export default function App() {
             u.email.toLowerCase() === current.email.toLowerCase()
         );
         if (remoteUser) {
-          const merged = { ...current, ...remoteUser };
+          const merged = sanitizeUserForSession({ ...current, ...remoteUser });
           localStorage.setItem('senai_brigada_user', JSON.stringify(merged));
           return merged;
         }
@@ -216,16 +254,19 @@ export default function App() {
 
   // --- Auth Handlers ---
   const handleLoginSuccess = (loggedUser: UserProfile) => {
-    setUser(loggedUser);
+    const safeUser = sanitizeUserForSession(loggedUser);
+    setUser(safeUser);
     setCurrentTab('inicio');
+    void establishServerSession(safeUser);
     fetchServerAlertStatus().then(setServerAlertStatus);
-    showToast(`Bem-vindo(a), ${loggedUser.name}!`);
-    logActivity('Sistema', 'login', `${loggedUser.name} realizou login no sistema`, undefined, undefined, loggedUser);
+    showToast(`Bem-vindo(a), ${safeUser.name}!`);
+    logActivity('Sistema', 'login', `${safeUser.name} realizou login no sistema`, undefined, undefined, safeUser);
   };
 
   const handleLogout = () => {
     setUser(null);
     localStorage.removeItem('senai_brigada_user');
+    clearServerSession();
     setCurrentTab('inicio');
     showToast('Sessão encerrada com sucesso.');
   };
@@ -244,10 +285,15 @@ export default function App() {
   };
 
   const handleUpdateUser = (updatedUser: RegisteredUser) => {
-    dbUsers.update(updatedUser);
+    const existingDbUser = dbUsers.getAll().find((u) => u.id === updatedUser.id);
+    const userToSave: RegisteredUser = {
+      ...updatedUser,
+      password: updatedUser.password || existingDbUser?.password,
+    };
+    dbUsers.update(userToSave);
     setUsers(dbUsers.getAll());
     if (user && user.id === updatedUser.id) {
-      const merged = { ...user, ...updatedUser };
+      const merged = sanitizeUserForSession({ ...user, ...userToSave });
       setUser(merged);
       localStorage.setItem('senai_brigada_user', JSON.stringify(merged));
     }
@@ -312,16 +358,10 @@ export default function App() {
     [users, serverAlertStatus.autoEmailConfigured, user]
   );
 
-  // Automatic background scan when extinguishers enter Atenção (e.g., validity window reached)
+  // Keep sent-alert map aligned when extinguishers leave Atenção (never auto-send on login/mount)
   useEffect(() => {
     syncSentAttentionMapWithCurrentExtinguishers(extinguishers);
-    if (!user || !serverAlertStatus.autoEmailConfigured) return;
-
-    const unsent = getUnsentAttentionExtinguishers(extinguishers);
-    if (unsent.length > 0) {
-      void triggerAttentionAlert(unsent, false);
-    }
-  }, [extinguishers, user, serverAlertStatus.autoEmailConfigured, triggerAttentionAlert]);
+  }, [extinguishers]);
 
   // --- Extinguisher Database Handlers ---
   const handleAddExtinguisher = (newExt: Extinguisher) => {
@@ -368,6 +408,7 @@ export default function App() {
   };
 
   const handleUpdateExtinguisher = (updated: Extinguisher) => {
+    const previousExt = extinguishers.find((e) => e.id === updated.id);
     dbExtinguishers.update(updated);
     setExtinguishers(dbExtinguishers.getAll());
 
@@ -400,7 +441,7 @@ export default function App() {
         updated.floor
       );
     }
-    if (updated.status === 'Atenção') {
+    if (updated.status === 'Atenção' && previousExt?.status !== 'Atenção') {
       void triggerAttentionAlert([updated], true);
     }
   };
@@ -427,13 +468,17 @@ export default function App() {
 
   // --- Inspection Database Handlers ---
   const handleUpdateInspection = (updated: Inspection) => {
+    const matchingExt = dbExtinguishers
+      .getAll()
+      .find((e) => e.code === updated.extinguisherCode);
+    const previousStatus =
+      matchingExt?.status ??
+      inspections.find((i) => i.id === updated.id)?.status;
+
     dbInspections.update(updated);
     setInspections(dbInspections.getAll());
 
     // Sync status and next inspection date back to matching extinguisher
-    const matchingExt = dbExtinguishers
-      .getAll()
-      .find((e) => e.code === updated.extinguisherCode);
     let syncedExt: Extinguisher | null = null;
     if (matchingExt) {
       syncedExt = {
@@ -457,7 +502,7 @@ export default function App() {
         updated.floor
       );
     }
-    if (updated.status === 'Atenção') {
+    if (updated.status === 'Atenção' && previousStatus !== 'Atenção') {
       const targetForEmail: Extinguisher = syncedExt || {
         id: updated.id,
         code: updated.extinguisherCode,
@@ -553,12 +598,6 @@ export default function App() {
     }
   };
 
-  const handleClearHistory = () => {
-    dbActivityLogs.clear();
-    setActivityLogs([]);
-    showToast('Histórico de atividades limpo com sucesso.');
-  };
-
   const handleSyncBrigadeMembersToDb = () => {
     const added = dbUsers.syncFromBrigadeMembers(members);
     if (added.length > 0) {
@@ -591,6 +630,10 @@ export default function App() {
       <AuthScreen
         registeredUsers={users}
         onLoginSuccess={handleLoginSuccess}
+        onMigrateUserPassword={(targetUser, hashedPassword) => {
+          dbUsers.update({ ...targetUser, password: hashedPassword });
+          setUsers(dbUsers.getAll());
+        }}
       />
     );
   }
@@ -689,7 +732,6 @@ export default function App() {
             <HistoryView
               user={user}
               activityLogs={activityLogs}
-              onClearHistory={handleClearHistory}
             />
           )}
 
@@ -761,6 +803,7 @@ export default function App() {
             <SettingsView
               key={`settings_${profileEditing ? 'edit' : 'view'}`}
               user={user}
+              storedPasswordHash={users.find((u) => u.id === user.id)?.password}
               onUpdateUser={handleUpdateUser}
               onLogout={handleLogout}
               onShowToast={showToast}

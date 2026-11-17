@@ -7,15 +7,25 @@ import React, { useState } from 'react';
 import { UserRole, RegisteredUser } from '../types/brigada';
 import { SenaiLogo } from './SenaiLogo';
 import { User, Lock, ArrowLeft, Eye, EyeOff } from 'lucide-react';
+import {
+  clearFailedLogin,
+  getLoginLockState,
+  hashPassword,
+  recordFailedLogin,
+  sanitizeUserForSession,
+  verifyPassword,
+} from '../utils/security';
 
 interface AuthScreenProps {
   registeredUsers: RegisteredUser[];
   onLoginSuccess: (user: RegisteredUser) => void;
+  onMigrateUserPassword?: (user: RegisteredUser, hashedPassword: string) => void;
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({
   registeredUsers,
   onLoginSuccess,
+  onMigrateUserPassword,
 }) => {
   const [step, setStep] = useState<'select_role' | 'login'>('select_role');
   const [selectedRole, setSelectedRole] = useState<UserRole>('Administrador');
@@ -23,6 +33,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [isVerifying, setIsVerifying] = useState(false);
 
   const handleSelectRole = (role: UserRole) => {
     setSelectedRole(role);
@@ -33,8 +44,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setStep('login');
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isVerifying) return;
+
     const cleanInput = emailOrUser.trim().toLowerCase();
     if (!cleanInput) {
       setErrorMessage('Por favor, informe seu usuário ou e-mail.');
@@ -45,34 +58,71 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
       return;
     }
 
-    // Authenticate against database registered users
-    const matchedUser = registeredUsers.find(
-      (u) =>
-        u.email.toLowerCase() === cleanInput ||
-        u.name.toLowerCase() === cleanInput ||
-        u.email.toLowerCase().startsWith(cleanInput + '@')
-    );
-
-    if (!matchedUser) {
-      setErrorMessage('E-mail ou usuário não encontrado no banco de dados.');
-      return;
-    }
-
-    if (matchedUser.role !== selectedRole) {
+    const lockState = getLoginLockState(cleanInput);
+    if (lockState.locked) {
       setErrorMessage(
-        `Este usuário está cadastrado como ${matchedUser.role}. Selecione o cargo correto na tela inicial.`
+        `Muitas tentativas incorretas. Aguarde ${lockState.remainingSeconds} segundo(s) antes de tentar novamente.`
       );
       return;
     }
 
-    // Check password
-    const userPass = matchedUser.password || 'senai123';
-    if (password !== userPass) {
-      setErrorMessage('Senha incorreta.');
-      return;
-    }
+    setIsVerifying(true);
+    try {
+      // Authenticate against database registered users
+      const matchedUser = registeredUsers.find(
+        (u) =>
+          u.email.toLowerCase() === cleanInput ||
+          u.name.toLowerCase() === cleanInput ||
+          u.email.toLowerCase().startsWith(cleanInput + '@')
+      );
 
-    onLoginSuccess(matchedUser);
+      if (!matchedUser) {
+        const fail = recordFailedLogin(cleanInput);
+        setErrorMessage(
+          fail.locked
+            ? `Muitas tentativas incorretas. Acesso bloqueado por ${fail.remainingSeconds} segundo(s).`
+            : 'E-mail, usuário ou senha inválidos.'
+        );
+        return;
+      }
+
+      if (matchedUser.role !== selectedRole) {
+        setErrorMessage(
+          `Este usuário está cadastrado como ${matchedUser.role}. Selecione o cargo correto na tela inicial.`
+        );
+        return;
+      }
+
+      const { valid, needsMigration } = await verifyPassword(
+        password,
+        matchedUser.password
+      );
+      if (!valid) {
+        const fail = recordFailedLogin(cleanInput);
+        setPassword('');
+        setErrorMessage(
+          fail.locked
+            ? `Muitas tentativas incorretas. Acesso bloqueado por ${fail.remainingSeconds} segundo(s).`
+            : 'E-mail, usuário ou senha inválidos.'
+        );
+        return;
+      }
+
+      clearFailedLogin(cleanInput);
+
+      if (needsMigration && onMigrateUserPassword) {
+        try {
+          const upgradedHash = await hashPassword(password);
+          onMigrateUserPassword(matchedUser, upgradedHash);
+        } catch {
+          // non-blocking upgrade failure
+        }
+      }
+
+      onLoginSuccess(sanitizeUserForSession(matchedUser));
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
   return (

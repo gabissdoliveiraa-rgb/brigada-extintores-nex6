@@ -59,16 +59,40 @@ export function buildActivityEntry(params: {
   };
 }
 
+export type ActivitySortOrder = 'recent' | 'oldest';
+
+export function getActivityLogLocalDateKey(
+  log: Pick<ActivityLogEntry, 'timestamp' | 'formattedDateTime'>
+): string {
+  if (log.timestamp) {
+    const d = new Date(log.timestamp);
+    if (!isNaN(d.getTime())) {
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    }
+  }
+  const brMatch = log.formattedDateTime?.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (brMatch) {
+    return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
+  }
+  return '';
+}
+
 /**
- * Filters activity logs by category, user, and search keywords.
+ * Filters activity logs by category, user, search keywords, and optional date,
+ * then sorts by most recent or oldest first.
  */
 export function filterActivityLogs(
   logs: ActivityLogEntry[],
   categoryFilter: string,
   userFilter: string,
-  searchTerm: string
+  searchTerm: string,
+  dateFilter = '',
+  sortOrder: ActivitySortOrder = 'recent'
 ): ActivityLogEntry[] {
-  return logs.filter((log) => {
+  const filtered = logs.filter((log) => {
     // Category filter
     if (categoryFilter !== 'Todos' && log.category !== categoryFilter) {
       return false;
@@ -77,6 +101,14 @@ export function filterActivityLogs(
     // User filter
     if (userFilter !== 'Todos' && log.userName !== userFilter) {
       return false;
+    }
+
+    // Specific date filter (YYYY-MM-DD)
+    if (dateFilter.trim() !== '') {
+      const logDate = getActivityLogLocalDateKey(log);
+      if (logDate !== dateFilter.trim()) {
+        return false;
+      }
     }
 
     // Search term
@@ -94,5 +126,13 @@ export function filterActivityLogs(
     }
 
     return true;
+  });
+
+  return [...filtered].sort((a, b) => {
+    const ta = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+    const tb = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+    const safeTa = Number.isNaN(ta) ? 0 : ta;
+    const safeTb = Number.isNaN(tb) ? 0 : tb;
+    return sortOrder === 'oldest' ? safeTa - safeTb : safeTb - safeTa;
   });
 }

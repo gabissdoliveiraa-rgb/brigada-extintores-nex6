@@ -4,11 +4,106 @@
  */
 
 import 'dotenv/config';
+import crypto from 'node:crypto';
 import express from 'express';
 import nodemailer from 'nodemailer';
 import path from 'path';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SESSION_SECRET =
+  process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const SESSION_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+
+function stripControlChars(value: unknown, maxLen = 200): string {
+  return String(value ?? '')
+    .replace(/[\r\n\x00-\x1F\x7F]+/g, ' ')
+    .trim()
+    .slice(0, maxLen);
+}
+
+interface SessionPayload {
+  userId: string;
+  email: string;
+  role: 'Administrador' | 'Funcionário';
+  exp: number;
+}
+
+function issueServerSessionToken(
+  userId: string,
+  email: string,
+  role: 'Administrador' | 'Funcionário'
+): { token: string; expiresAt: number } {
+  const expiresAt = Date.now() + SESSION_TTL_MS;
+  const payload: SessionPayload = { userId, email, role, exp: expiresAt };
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = crypto
+    .createHmac('sha256', SESSION_SECRET)
+    .update(payloadB64)
+    .digest('base64url');
+  return { token: `${payloadB64}.${sig}`, expiresAt };
+}
+
+function verifyServerSessionToken(token: string): SessionPayload | null {
+  const parts = token.split('.');
+  if (parts.length !== 2) return null;
+  const [payloadB64, sigB64] = parts;
+  if (!payloadB64 || !sigB64) return null;
+
+  const expectedSig = crypto
+    .createHmac('sha256', SESSION_SECRET)
+    .update(payloadB64)
+    .digest('base64url');
+
+  const sigBuf = Buffer.from(sigB64);
+  const expectedBuf = Buffer.from(expectedSig);
+  if (
+    sigBuf.length !== expectedBuf.length ||
+    !crypto.timingSafeEqual(sigBuf, expectedBuf)
+  ) {
+    return null;
+  }
+
+  try {
+    const decoded = JSON.parse(
+      Buffer.from(payloadB64, 'base64url').toString('utf8')
+    ) as SessionPayload;
+    if (
+      !decoded ||
+      !decoded.userId ||
+      !decoded.email ||
+      (decoded.role !== 'Administrador' && decoded.role !== 'Funcionário') ||
+      typeof decoded.exp !== 'number' ||
+      decoded.exp < Date.now()
+    ) {
+      return null;
+    }
+    return decoded;
+  } catch {
+    return null;
+  }
+}
+
+const rateLimitStore = new Map<string, { count: number; resetAt: number }>();
+
+function checkIpRateLimit(
+  bucket: string,
+  ip: string,
+  maxRequests: number,
+  windowMs: number
+): boolean {
+  const now = Date.now();
+  const key = `${bucket}:${ip}`;
+  const entry = rateLimitStore.get(key);
+  if (!entry || entry.resetAt <= now) {
+    rateLimitStore.set(key, { count: 1, resetAt: now + windowMs });
+    return true;
+  }
+  if (entry.count >= maxRequests) {
+    return false;
+  }
+  entry.count += 1;
+  return true;
+}
 
 interface AlertExtinguisherPayload {
   id?: string;
@@ -80,16 +175,26 @@ function buildAlertEmailBody(
   operatorName?: string
 ) {
   const count = extinguishers.length;
+  const firstCode = stripControlChars(extinguishers[0]?.code, 40);
   const subject =
     count === 1
-      ? `[SENAI Brigada] Alerta de Atenção: Extintor #${extinguishers[0].code} próximo do vencimento`
+      ? `[SENAI Brigada] Alerta de Atenção: Extintor #${firstCode} próximo do vencimento`
       : `[SENAI Brigada] Alerta de Atenção: ${count} extintores próximos do vencimento`;
 
   const lines = extinguishers.map((ext, idx) => {
-    return `${idx + 1}. Extintor #${ext.code} (${ext.type}${ext.capacity ? ` - ${ext.capacity}` : ''})
-   - Pavimento/Local: ${ext.floor} — ${ext.location}
-   - Próx. Inspeção: ${ext.nextInspectionDate || '-'} | Validade: ${ext.expirationDate || '-'}
-   - Status: ${ext.status}`;
+    const code = stripControlChars(ext.code, 40);
+    const type = stripControlChars(ext.type, 50);
+    const capacity = stripControlChars(ext.capacity, 30);
+    const floor = stripControlChars(ext.floor, 60);
+    const location = stripControlChars(ext.location, 120);
+    const nextInsp = stripControlChars(ext.nextInspectionDate || '-', 30);
+    const expDate = stripControlChars(ext.expirationDate || '-', 30);
+    const status = stripControlChars(ext.status, 30);
+
+    return `${idx + 1}. Extintor #${code} (${type}${capacity ? ` - ${capacity}` : ''})
+   - Pavimento/Local: ${floor} — ${location}
+   - Próx. Inspeção: ${nextInsp} | Validade: ${expDate}
+   - Status: ${status}`;
   });
 
   const now = new Date();
@@ -98,6 +203,7 @@ function buildAlertEmailBody(
     hour: '2-digit',
     minute: '2-digit',
   });
+  const cleanOperator = stripControlChars(operatorName, 80);
 
   const text = [
     'Olá,',
@@ -110,7 +216,7 @@ function buildAlertEmailBody(
     ...lines,
     '',
     `Data do envio: ${dateStr} às ${timeStr}`,
-    operatorName ? `Registrado por: ${operatorName}` : '',
+    cleanOperator ? `Registrado por: ${cleanOperator}` : '',
     '',
     'Atenciosamente,',
     'Brigada de Incêndio & SST - SENAI',
@@ -125,7 +231,55 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
-  app.use(express.json({ limit: '1mb' }));
+  app.disable('x-powered-by');
+  app.use((_req, res, next) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+    res.setHeader(
+      'Permissions-Policy',
+      'camera=(self), microphone=(), geolocation=()'
+    );
+    next();
+  });
+
+  app.use(express.json({ limit: '512kb' }));
+
+  // Issue short-lived signed session token for authenticated app users
+  app.post('/api/auth/session', (req, res) => {
+    const clientIp = req.ip || 'unknown';
+    if (!checkIpRateLimit('auth_session', clientIp, 30, 15 * 60 * 1000)) {
+      res.status(429).json({
+        success: false,
+        error: 'Muitas solicitações de sessão. Tente novamente em alguns minutos.',
+      });
+      return;
+    }
+
+    const body = req.body as {
+      userId?: string;
+      email?: string;
+      role?: string;
+    };
+    const userId = stripControlChars(body?.userId, 128);
+    const email = stripControlChars(body?.email, 160);
+    const role = body?.role;
+
+    if (
+      !userId ||
+      !EMAIL_REGEX.test(email) ||
+      (role !== 'Administrador' && role !== 'Funcionário')
+    ) {
+      res.status(400).json({
+        success: false,
+        error: 'Dados de sessão inválidos.',
+      });
+      return;
+    }
+
+    const { token, expiresAt } = issueServerSessionToken(userId, email, role);
+    res.json({ success: true, token, expiresAt });
+  });
 
   // Check whether server-side automatic email sender is configured
   app.get('/api/alerts/status', (_req, res) => {
@@ -139,6 +293,28 @@ async function startServer() {
 
   // Automatically dispatch attention alerts to all registered DB emails
   app.post('/api/alerts/send-attention', async (req, res) => {
+    const authHeader = req.headers.authorization || '';
+    const bearerToken = authHeader.startsWith('Bearer ')
+      ? authHeader.slice(7).trim()
+      : '';
+    const session = verifyServerSessionToken(bearerToken);
+    if (!session) {
+      res.status(401).json({
+        success: false,
+        error: 'Sessão não autenticada para disparo de alertas.',
+      });
+      return;
+    }
+
+    const clientIp = req.ip || 'unknown';
+    if (!checkIpRateLimit('send_attention', clientIp, 10, 15 * 60 * 1000)) {
+      res.status(429).json({
+        success: false,
+        error: 'Limite de envios atingido temporariamente. Aguarde alguns minutos.',
+      });
+      return;
+    }
+
     const cfg = getEmailProviderConfig();
     if (!cfg.configured) {
       res.status(503).json({
@@ -156,18 +332,19 @@ async function startServer() {
       operatorName?: string;
     };
 
-    const extinguishers = Array.isArray(body?.extinguishers)
+    const rawExtinguishers = Array.isArray(body?.extinguishers)
       ? body.extinguishers
       : [];
-    if (extinguishers.length === 0) {
+    if (rawExtinguishers.length === 0 || rawExtinguishers.length > 50) {
       res.status(400).json({
         success: false,
-        error: 'Nenhum extintor em atenção informado para envio.',
+        error: 'Quantidade inválida de extintores informada (1 a 50).',
       });
       return;
     }
+    const extinguishers = rawExtinguishers.slice(0, 50);
 
-    const recipients = sanitizeRecipients(body?.recipients);
+    const recipients = sanitizeRecipients(body?.recipients).slice(0, 50);
     if (recipients.length === 0) {
       res.status(400).json({
         success: false,

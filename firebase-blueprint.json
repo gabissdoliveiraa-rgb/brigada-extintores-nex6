@@ -5,114 +5,119 @@
       "description": "Extintor de incêndio cadastrado no sistema SENAI",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "code": { "type": "string" },
-        "type": { "type": "string" },
-        "floor": { "type": "string" },
-        "location": { "type": "string" },
-        "capacity": { "type": "string" },
-        "status": { "type": "string" },
-        "validityDate": { "type": "string" },
-        "nextInspectionDate": { "type": "string" },
-        "qrCode": { "type": "string" },
-        "notes": { "type": "string" },
-        "lastInspectedAt": { "type": "string" }
+        "id": { "type": "string", "maxLength": 128 },
+        "code": { "type": "string", "maxLength": 40 },
+        "type": { "type": "string", "enum": ["Pó Químico ABC", "CO2", "Água", "Espuma Mecânica"] },
+        "floor": { "type": "string", "maxLength": 80 },
+        "location": { "type": "string", "maxLength": 160 },
+        "capacity": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["Em dia", "Atenção", "Vencido"] },
+        "purchaseDate": { "type": "string", "maxLength": 40 },
+        "expirationDate": { "type": "string", "maxLength": 40 },
+        "validityDate": { "type": "string", "maxLength": 40 },
+        "nextInspectionDate": { "type": "string", "maxLength": 40 },
+        "qrCode": { "type": "string", "maxLength": 120 },
+        "notes": { "type": "string", "maxLength": 1000 },
+        "x": { "type": "number" },
+        "y": { "type": "number" },
+        "lastInspectedAt": { "type": "string", "maxLength": 60 }
       },
-      "required": ["code", "type", "floor", "location", "status"]
+      "required": ["id", "code", "type", "floor", "location", "capacity", "status"]
     },
     "BrigadeMember": {
       "title": "BrigadeMember",
       "description": "Membro integrante da brigada de incêndio SENAI",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "role": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 120 },
+        "role": { "type": "string", "maxLength": 80 },
         "isLeader": { "type": "boolean" },
-        "jobTitle": { "type": "string" },
-        "functionDescription": { "type": "string" },
-        "phone": { "type": "string" },
-        "email": { "type": "string" },
-        "responsibleFloor": { "type": "string" },
-        "trainingStatus": { "type": "string" },
-        "trainingExpirationDate": { "type": "string" },
-        "avatarUrl": { "type": "string" }
+        "jobTitle": { "type": "string", "maxLength": 120 },
+        "functionDescription": { "type": "string", "maxLength": 500 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 160 },
+        "responsibleFloor": { "type": "string", "maxLength": 80 },
+        "trainingStatus": { "type": "string", "enum": ["Em dia", "Vencido"] },
+        "trainingExpirationDate": { "type": "string", "maxLength": 40 },
+        "avatarUrl": { "type": "string", "maxLength": 800000 }
       },
-      "required": ["name", "role", "email"]
+      "required": ["id", "name", "role", "isLeader", "email", "responsibleFloor", "trainingStatus"]
     },
     "Inspection": {
       "title": "Inspection",
       "description": "Registro de inspeção e vistoria periódica de extintor",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "code": { "type": "string" },
-        "extinguisherCode": { "type": "string" },
-        "extinguisherType": { "type": "string" },
-        "date": { "type": "string" },
-        "responsible": { "type": "string" },
-        "status": { "type": "string" },
-        "floor": { "type": "string" },
-        "location": { "type": "string" },
-        "capacity": { "type": "string" },
-        "validityDate": { "type": "string" },
-        "nextInspectionDate": { "type": "string" },
-        "notes": { "type": "string" }
+        "id": { "type": "string", "maxLength": 128 },
+        "code": { "type": "string", "maxLength": 40 },
+        "extinguisherCode": { "type": "string", "maxLength": 40 },
+        "extinguisherType": { "type": "string", "maxLength": 60 },
+        "date": { "type": "string", "maxLength": 40 },
+        "responsible": { "type": "string", "maxLength": 120 },
+        "status": { "type": "string", "enum": ["Em dia", "Atenção", "Vencido"] },
+        "floor": { "type": "string", "maxLength": 80 },
+        "location": { "type": "string", "maxLength": 160 },
+        "capacity": { "type": "string", "maxLength": 40 },
+        "validityDate": { "type": "string", "maxLength": 40 },
+        "nextInspectionDate": { "type": "string", "maxLength": 40 },
+        "notes": { "type": "string", "maxLength": 1000 }
       },
-      "required": ["extinguisherCode", "date", "responsible", "status"]
+      "required": ["id", "extinguisherCode", "date", "responsible", "status"]
     },
     "Notice": {
       "title": "Notice",
       "description": "Aviso de manutenção preventiva ou vencimento de extintores",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "type": { "type": "string" },
-        "description": { "type": "string" },
-        "date": { "type": "string" },
-        "status": { "type": "string" },
-        "extinguisherCode": { "type": "string" }
+        "id": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "maxLength": 80 },
+        "description": { "type": "string", "maxLength": 500 },
+        "date": { "type": "string", "maxLength": 40 },
+        "status": { "type": "string", "enum": ["Vencido", "A vencer", "Pendente"] },
+        "extinguisherCode": { "type": "string", "maxLength": 40 }
       },
-      "required": ["type", "description", "status"]
+      "required": ["id", "type", "description", "date", "status"]
     },
     "ActivityLog": {
       "title": "ActivityLog",
-      "description": "Log auditável de ações executadas no sistema",
+      "description": "Log auditável imutável de ações executadas no sistema",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "userName": { "type": "string" },
-        "userRole": { "type": "string" },
-        "userEmail": { "type": "string" },
-        "category": { "type": "string" },
-        "actionType": { "type": "string" },
-        "description": { "type": "string" },
-        "timestamp": { "type": "string" },
-        "formattedDateTime": { "type": "string" },
-        "targetCode": { "type": "string" },
-        "targetFloor": { "type": "string" },
-        "details": { "type": "string" }
+        "id": { "type": "string", "maxLength": 128 },
+        "userName": { "type": "string", "maxLength": 120 },
+        "userRole": { "type": "string", "enum": ["Administrador", "Funcionário"] },
+        "userEmail": { "type": "string", "maxLength": 160 },
+        "category": { "type": "string", "enum": ["Extintores", "Inspeções", "Brigada", "Relatórios", "Usuários", "Sistema"] },
+        "actionType": { "type": "string", "enum": ["create", "update", "delete", "inspect", "report", "login", "system"] },
+        "description": { "type": "string", "maxLength": 1000 },
+        "timestamp": { "type": "string", "maxLength": 60 },
+        "formattedDateTime": { "type": "string", "maxLength": 60 },
+        "targetCode": { "type": "string", "maxLength": 40 },
+        "targetFloor": { "type": "string", "maxLength": 80 },
+        "details": { "type": "string", "maxLength": 1000 }
       },
-      "required": ["userName", "category", "actionType", "description"]
+      "required": ["id", "userName", "userRole", "category", "actionType", "description", "timestamp", "formattedDateTime"]
     },
     "RegisteredUser": {
       "title": "RegisteredUser",
       "description": "Usuário autorizado a acessar o sistema SENAI",
       "type": "object",
       "properties": {
-        "id": { "type": "string" },
-        "name": { "type": "string" },
-        "role": { "type": "string" },
-        "email": { "type": "string" },
-        "phone": { "type": "string" },
-        "responsibleSector": { "type": "string" },
-        "birthDate": { "type": "string" },
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 120 },
+        "role": { "type": "string", "enum": ["Administrador", "Funcionário"] },
+        "email": { "type": "string", "maxLength": 160 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "avatarUrl": { "type": "string", "maxLength": 800000 },
+        "responsibleSector": { "type": "string", "maxLength": 80 },
+        "birthDate": { "type": "string", "maxLength": 30 },
         "isLeader": { "type": "boolean" },
-        "trainingStatus": { "type": "string" },
-        "password": { "type": "string" },
-        "createdAt": { "type": "string" }
+        "trainingStatus": { "type": "string", "enum": ["Em dia", "Vencido"] },
+        "password": { "type": "string", "maxLength": 256 },
+        "createdAt": { "type": "string", "maxLength": 40 }
       },
-      "required": ["name", "role", "email"]
+      "required": ["id", "name", "role", "email"]
     }
   },
   "firestore": {

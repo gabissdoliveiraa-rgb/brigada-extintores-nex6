@@ -9,7 +9,7 @@ import {
   ActivityLogEntry,
   UserProfile,
 } from '../types/brigada';
-import { filterActivityLogs } from '../utils/activityUtils';
+import { ActivitySortOrder, filterActivityLogs } from '../utils/activityUtils';
 import { ExtinguisherIcon } from './ExtinguisherIcon';
 import {
   History,
@@ -20,9 +20,9 @@ import {
   FileBarChart2,
   UserCheck,
   Shield,
-  Trash2,
   Clock,
-  Download,
+  Calendar,
+  ArrowUpDown,
   FileDown,
   AlertCircle,
 } from 'lucide-react';
@@ -31,19 +31,18 @@ import { generateActivityHistoryPdf } from '../utils/pdfGenerator';
 interface HistoryViewProps {
   user: UserProfile;
   activityLogs: ActivityLogEntry[];
-  onClearHistory?: () => void;
   onRefresh?: () => void;
 }
 
 export const HistoryView: React.FC<HistoryViewProps> = ({
   user,
   activityLogs,
-  onClearHistory,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('Todos');
   const [selectedUser, setSelectedUser] = useState<string>('Todos');
   const [searchTerm, setSearchTerm] = useState<string>('');
-  const [showClearConfirm, setShowClearConfirm] = useState<boolean>(false);
+  const [selectedDate, setSelectedDate] = useState<string>('');
+  const [sortOrder, setSortOrder] = useState<ActivitySortOrder>('recent');
 
   // Extract unique user names for filter dropdown
   const uniqueUsers = useMemo(() => {
@@ -52,15 +51,17 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
     return Array.from(set).sort();
   }, [activityLogs]);
 
-  // Filtered logs
+  // Filtered and sorted logs
   const filteredLogs = useMemo(() => {
     return filterActivityLogs(
       activityLogs,
       selectedCategory,
       selectedUser,
-      searchTerm
+      searchTerm,
+      selectedDate,
+      sortOrder
     );
-  }, [activityLogs, selectedCategory, selectedUser, searchTerm]);
+  }, [activityLogs, selectedCategory, selectedUser, searchTerm, selectedDate, sortOrder]);
 
   // Statistics
   const stats = useMemo(() => {
@@ -136,17 +137,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             <FileDown className="w-3.5 h-3.5" />
             <span>Exportar PDF</span>
           </button>
-
-          {user.role === 'Administrador' && onClearHistory && (
-            <button
-              onClick={() => setShowClearConfirm(true)}
-              className="flex items-center gap-1.5 px-3 py-2 text-red-600 hover:bg-red-50 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-              title="Limpar histórico do sistema"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-              <span>Limpar</span>
-            </button>
-          )}
         </div>
       </div>
 
@@ -217,20 +207,21 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           </div>
         </div>
 
-        {/* User filter & search input */}
+        {/* User filter, date picker, sort order & search input */}
         <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 pt-2 border-t border-slate-100">
-          <div className="sm:col-span-5 relative">
+          <div className="sm:col-span-4 relative">
             <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               placeholder="Buscar por ação, extintor, pessoa..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              aria-label="Buscar no histórico"
               className="w-full pl-9 pr-3.5 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-slate-800"
             />
           </div>
 
-          <div className="sm:col-span-4 relative">
+          <div className="sm:col-span-3 relative">
             <Filter className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <select
               value={selectedUser}
@@ -247,21 +238,52 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             </select>
           </div>
 
-          {(selectedCategory !== 'Todos' || selectedUser !== 'Todos' || searchTerm) && (
-            <div className="sm:col-span-3 flex items-center justify-end">
-              <button
-                onClick={() => {
-                  setSelectedCategory('Todos');
-                  setSelectedUser('Todos');
-                  setSearchTerm('');
-                }}
-                className="text-xs text-red-600 hover:text-red-700 font-semibold cursor-pointer underline"
-              >
-                Limpar filtros
-              </button>
-            </div>
-          )}
+          <div className="sm:col-span-3 relative">
+            <Calendar className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <input
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              aria-label="Escolher por data"
+              title="Filtrar por data específica"
+              className="w-full pl-8 pr-3 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-slate-800 cursor-pointer"
+            />
+          </div>
+
+          <div className="sm:col-span-2 relative">
+            <ArrowUpDown className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <select
+              value={sortOrder}
+              onChange={(e) => setSortOrder(e.target.value as ActivitySortOrder)}
+              aria-label="Ordenar histórico"
+              className="w-full pl-8 pr-2 py-2 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500 text-slate-800 cursor-pointer"
+            >
+              <option value="recent">Mais recente</option>
+              <option value="oldest">Menos recente</option>
+            </select>
+          </div>
         </div>
+
+        {(selectedCategory !== 'Todos' ||
+          selectedUser !== 'Todos' ||
+          searchTerm ||
+          selectedDate ||
+          sortOrder !== 'recent') && (
+          <div className="flex items-center justify-end">
+            <button
+              onClick={() => {
+                setSelectedCategory('Todos');
+                setSelectedUser('Todos');
+                setSearchTerm('');
+                setSelectedDate('');
+                setSortOrder('recent');
+              }}
+              className="text-xs text-red-600 hover:text-red-700 font-semibold cursor-pointer underline"
+            >
+              Limpar filtros
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Activity Timeline Card */}
@@ -274,7 +296,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
             </h2>
           </div>
           <span className="text-[11px] text-slate-400">
-            Mais recentes primeiro
+            {sortOrder === 'oldest' ? 'Menos recentes primeiro' : 'Mais recentes primeiro'}
           </span>
         </div>
 
@@ -360,38 +382,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
           </div>
         )}
       </div>
-
-      {/* Clear Confirmation Modal */}
-      {showClearConfirm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-sm w-full space-y-4 shadow-xl animate-fadeIn">
-            <div className="flex items-center gap-3 text-red-600">
-              <AlertCircle className="w-6 h-6" />
-              <h3 className="text-base font-bold text-slate-900">Limpar Histórico?</h3>
-            </div>
-            <p className="text-xs text-slate-600 leading-relaxed">
-              Tem certeza que deseja apagar todos os registros de histórico? Esta ação é irreversível.
-            </p>
-            <div className="flex items-center justify-end gap-2 pt-2">
-              <button
-                onClick={() => setShowClearConfirm(false)}
-                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => {
-                  if (onClearHistory) onClearHistory();
-                  setShowClearConfirm(false);
-                }}
-                className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white text-xs font-bold rounded-lg cursor-pointer shadow-xs"
-              >
-                Sim, Limpar Tudo
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

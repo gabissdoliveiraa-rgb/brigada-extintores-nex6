@@ -22,6 +22,7 @@ import {
 } from '../data/initialData';
 import { buildActivityEntry } from '../utils/activityUtils';
 import { computeStatusFromValidity } from '../utils/brigadaLogic';
+import { hashPassword, isPasswordHashed } from '../utils/security';
 import { db } from '../firebase';
 import {
   collection,
@@ -371,6 +372,49 @@ export const dbUsers = {
     }
 
     return added;
+  },
+  migrateLegacyPasswords: async (): Promise<number> => {
+    const list = dbUsers.getAll();
+    const toUpgrade = list.filter((u) => !isPasswordHashed(u.password));
+    if (toUpgrade.length === 0) return 0;
+
+    const upgradedMap = new Map<string, string>();
+    for (const u of toUpgrade) {
+      const plain = u.password || 'senai123';
+      upgradedMap.set(u.id, await hashPassword(plain));
+    }
+
+    const updated = list.map((u) => {
+      const hashed = upgradedMap.get(u.id);
+      return hashed ? { ...u, password: hashed } : u;
+    });
+
+    saveToStorage(KEYS.USERS, updated);
+    notify(listeners.users, updated);
+
+    if (db && typeof window !== 'undefined') {
+      try {
+        for (let i = 0; i < toUpgrade.length; i += 400) {
+          const batch = writeBatch(db);
+          toUpgrade.slice(i, i + 400).forEach((u) => {
+            const hashed = upgradedMap.get(u.id);
+            if (hashed) {
+              batch.set(
+                doc(db!, 'users', sanitizeDocId(u.id)),
+                cleanForFirestore({ ...u, password: hashed })
+              );
+            }
+          });
+          batch.commit().catch((err) =>
+            console.warn('Erro ao migrar hashes de senha no Firestore:', err)
+          );
+        }
+      } catch (err) {
+        console.warn('Erro no batch de migração de senhas:', err);
+      }
+    }
+
+    return toUpgrade.length;
   },
 };
 
@@ -794,7 +838,9 @@ export function resetDatabaseToInitial(): void {
   dbInspections.saveAll(INITIAL_INSPECTIONS);
   dbBrigade.saveAll(INITIAL_BRIGADE_MEMBERS);
   dbNotices.saveAll(INITIAL_NOTICES);
-  dbActivityLogs.saveAll(INITIAL_ACTIVITY_LOGS);
+  // Keep remote activity_logs immutable/append-only; only reset local fallback if cleared
+  saveToStorage(KEYS.ACTIVITY_LOGS, INITIAL_ACTIVITY_LOGS);
+  notify(listeners.activityLogs, INITIAL_ACTIVITY_LOGS);
 }
 
 // --- REAL-TIME FIRESTORE SYNC INITIALIZER ---
@@ -894,6 +940,9 @@ export function initFirestoreRealtimeSync(): () => void {
           snapshot.forEach((d) => remoteList.push(d.data() as RegisteredUser));
           saveToStorage(KEYS.USERS, remoteList);
           notify(listeners.users, remoteList);
+          if (remoteList.some((u) => !isPasswordHashed(u.password))) {
+            void dbUsers.migrateLegacyPasswords();
+          }
         }
         usersReady = true;
         runOneTimeBrigadeUsersBackfill();

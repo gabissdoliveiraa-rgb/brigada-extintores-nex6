@@ -39,6 +39,7 @@ import {
   validateEmail,
   SENAI_SECTOR_OPTIONS,
 } from '../utils/maskUtils';
+import { hashPassword, validatePasswordStrength } from '../utils/security';
 import { ExtinguisherIcon } from './ExtinguisherIcon';
 
 interface DatabaseViewProps {
@@ -142,16 +143,17 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
     setFormRole(user.role);
     setFormEmail(user.email);
     setFormPhone(user.phone);
-    setFormPassword(user.password || '');
+    setFormPassword('');
     setFormSector(user.responsibleSector || '1º andar');
     setUserModalOpen(true);
   };
 
-  const handleSaveUser = (e: React.FormEvent) => {
+  const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmedName = formName.trim();
     const trimmedEmail = formEmail.trim();
     const trimmedPhone = formPhone.trim();
+    const trimmedPassword = formPassword.trim();
 
     if (!trimmedName || !trimmedEmail) {
       onShowToast('Nome e e-mail são obrigatórios.');
@@ -182,12 +184,18 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
       }
     }
 
-    if (!editingUserId && !formPassword.trim()) {
-      onShowToast('Digite uma senha de acesso para o novo e-mail.');
-      return;
+    if (!editingUserId || trimmedPassword) {
+      const passCheck = validatePasswordStrength(trimmedPassword);
+      if (!passCheck.valid) {
+        onShowToast(passCheck.error || 'Informe uma senha válida (mín. 6 caracteres).');
+        return;
+      }
     }
 
     const normalizedPhone = trimmedPhone === '(11) 9' ? '' : trimmedPhone;
+    const hashedNewPassword = trimmedPassword
+      ? await hashPassword(trimmedPassword)
+      : undefined;
 
     if (editingUserId) {
       const existing = users.find((u) => u.id === editingUserId);
@@ -198,7 +206,7 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
           role: formRole,
           email: trimmedEmail,
           phone: normalizedPhone,
-          password: formPassword.trim() || existing.password,
+          password: hashedNewPassword || existing.password,
           responsibleSector: formSector.trim(),
         });
       }
@@ -208,7 +216,7 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
         role: formRole,
         email: trimmedEmail,
         phone: normalizedPhone,
-        password: formPassword.trim(),
+        password: hashedNewPassword,
         responsibleSector: formSector.trim(),
       });
     }
