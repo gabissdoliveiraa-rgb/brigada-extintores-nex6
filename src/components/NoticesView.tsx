@@ -136,19 +136,9 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
           </div>
           <p className="text-xs text-amber-800">
             {isAutoServerActive
-              ? `Assim que qualquer extintor entra em Atenção (perto de vencer), o servidor envia o alerta automaticamente em segundo plano para os ${effectiveRecipients.length} e-mail(s) cadastrados no banco:`
-              : `Quando um extintor entra no status Atenção (perto de vencer), o alerta é preparado para os ${effectiveRecipients.length} e-mail(s) cadastrados em Banco de Dados & E-mails:`}
+              ? `Assim que qualquer extintor entra em Atenção (perto de vencer), o servidor envia o alerta automaticamente em segundo plano para os ${effectiveRecipients.length} e-mail(s) cadastrados no banco.`
+              : `Quando um extintor entra no status Atenção (perto de vencer), o alerta é preparado para os ${effectiveRecipients.length} e-mail(s) cadastrados em Banco de Dados & E-mails.`}
           </p>
-          <div className="flex flex-wrap gap-1.5">
-            {effectiveRecipients.map((email) => (
-              <span
-                key={email}
-                className="inline-flex items-center gap-1 px-2 py-0.5 bg-white border border-amber-200 rounded-md font-mono text-[11px] font-semibold text-amber-900"
-              >
-                {email}
-              </span>
-            ))}
-          </div>
           {authError && (
             <p className="text-xs text-red-600 font-medium">{authError}</p>
           )}
