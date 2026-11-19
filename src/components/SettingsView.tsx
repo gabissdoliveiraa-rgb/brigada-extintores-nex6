@@ -53,9 +53,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Form states
-  const [editName, setEditName] = useState(user.name);
-  const [editEmail, setEditEmail] = useState(user.email);
-  const [editPhone, setEditPhone] = useState(user.phone);
+  const [editName, setEditName] = useState(user.name || '');
+  const [editEmail, setEditEmail] = useState(user.email || '');
+  const [editPhone, setEditPhone] = useState(user.phone || '');
   const [editCargo] = useState(user.role);
   const [editSector, setEditSector] = useState(
     user.responsibleSector || SENAI_SECTOR_OPTIONS[2]
@@ -82,9 +82,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // Synchronize when user prop updates
   useEffect(() => {
-    setEditName(user.name);
-    setEditEmail(user.email);
-    setEditPhone(user.phone);
+    setEditName(user.name || '');
+    setEditEmail(user.email || '');
+    setEditPhone(user.phone || '');
     setEditSector(user.responsibleSector || SENAI_SECTOR_OPTIONS[2]);
     setEditBirthDate(user.birthDate || '27/07/2000');
     setAvatarUrl(user.avatarUrl);
@@ -465,6 +465,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                           : 'border-slate-300 focus:ring-red-500'
                       }`}
                     >
+                      {editSector && !SENAI_SECTOR_OPTIONS.includes(editSector) && (
+                        <option value={editSector}>{editSector}</option>
+                      )}
                       {SENAI_SECTOR_OPTIONS.map((opt) => (
                         <option key={opt} value={opt}>
                           {opt}

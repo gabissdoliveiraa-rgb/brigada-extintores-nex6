@@ -98,6 +98,8 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
   const [formPassword, setFormPassword] = useState('');
   const [formSector, setFormSector] = useState('1º andar');
   const [showPassword, setShowPassword] = useState(false);
+  const [modalError, setModalError] = useState<string | null>(null);
+  const [isSavingUser, setIsSavingUser] = useState(false);
 
   // User deletion confirm modal
   const [deleteUserId, setDeleteUserId] = useState<string | null>(null);
@@ -110,10 +112,11 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
   const [jsonInput, setJsonInput] = useState('');
 
   const filteredUsers = users.filter((u) => {
+    const query = userSearch.toLowerCase();
     const matchesSearch =
-      u.name.toLowerCase().includes(userSearch.toLowerCase()) ||
-      u.email.toLowerCase().includes(userSearch.toLowerCase()) ||
-      u.phone.toLowerCase().includes(userSearch.toLowerCase());
+      (u.name || '').toLowerCase().includes(query) ||
+      (u.email || '').toLowerCase().includes(query) ||
+      (u.phone || '').toLowerCase().includes(query);
     const matchesRole = roleFilter === 'Todos' || u.role === roleFilter;
     return matchesSearch && matchesRole;
   });
@@ -134,52 +137,93 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
     setFormPhone('(11) 9');
     setFormPassword('');
     setFormSector('1º andar');
+    setShowPassword(false);
+    setModalError(null);
+    setIsSavingUser(false);
     setUserModalOpen(true);
   };
 
   const handleOpenEditUser = (user: RegisteredUser) => {
     setEditingUserId(user.id);
-    setFormName(user.name);
-    setFormRole(user.role);
-    setFormEmail(user.email);
-    setFormPhone(user.phone);
+    setFormName(user.name || '');
+    setFormRole(user.role || 'Funcionário');
+    setFormEmail(user.email || '');
+    setFormPhone(user.phone || '');
     setFormPassword('');
     setFormSector(user.responsibleSector || '1º andar');
+    setShowPassword(false);
+    setModalError(null);
+    setIsSavingUser(false);
     setUserModalOpen(true);
   };
 
   const handleSaveUser = async (e: React.FormEvent) => {
     e.preventDefault();
-    const trimmedName = formName.trim();
-    const trimmedEmail = formEmail.trim();
-    const trimmedPhone = formPhone.trim();
-    const trimmedPassword = formPassword.trim();
+    setModalError(null);
+
+    const fail = (message: string) => {
+      setModalError(message);
+      onShowToast(message);
+    };
+
+    const trimmedName = (formName || '').trim();
+    const trimmedEmail = (formEmail || '').trim();
+    const trimmedPhone = (formPhone || '').trim();
+    const trimmedPassword = (formPassword || '').trim();
+    const trimmedSector = (formSector || '').trim();
 
     if (!trimmedName || !trimmedEmail) {
-      onShowToast('Nome e e-mail são obrigatórios.');
+      fail('Nome e e-mail são obrigatórios.');
       return;
     }
 
     const emailChk = validateEmail(trimmedEmail);
     if (!emailChk.valid) {
-      onShowToast(emailChk.error || 'Informe um e-mail válido.');
+      fail(emailChk.error || 'Informe um e-mail válido.');
       return;
     }
 
-    const duplicate = users.some(
-      (u) =>
-        u.id !== editingUserId &&
-        u.email.trim().toLowerCase() === trimmedEmail.toLowerCase()
-    );
-    if (duplicate) {
-      onShowToast('Já existe uma conta cadastrada com este e-mail.');
+    const existing = editingUserId
+      ? users.find((u) => u.id === editingUserId)
+      : undefined;
+
+    if (editingUserId && !existing) {
+      fail('Usuário não encontrado na lista atual. Feche e tente novamente.');
       return;
+    }
+
+    const emailChanged =
+      !existing ||
+      (existing.email || '').trim().toLowerCase() !== trimmedEmail.toLowerCase();
+
+    const duplicate =
+      emailChanged &&
+      users.some(
+        (u) =>
+          u.id !== editingUserId &&
+          (u.email || '').trim().toLowerCase() === trimmedEmail.toLowerCase()
+      );
+    if (duplicate) {
+      fail('Já existe outra conta cadastrada com este e-mail.');
+      return;
+    }
+
+    if (
+      existing &&
+      existing.role === 'Administrador' &&
+      formRole !== 'Administrador'
+    ) {
+      const adminCount = users.filter((u) => u.role === 'Administrador').length;
+      if (adminCount <= 1) {
+        fail('Não é possível rebaixar o único Administrador do sistema.');
+        return;
+      }
     }
 
     if (trimmedPhone && trimmedPhone !== '(11) 9') {
       const phoneChk = validatePhone(trimmedPhone);
       if (!phoneChk.valid) {
-        onShowToast(phoneChk.error || 'Telefone inválido (use DDD + número).');
+        fail(phoneChk.error || 'Telefone inválido (use DDD + número).');
         return;
       }
     }
@@ -187,19 +231,19 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
     if (!editingUserId || trimmedPassword) {
       const passCheck = validatePasswordStrength(trimmedPassword);
       if (!passCheck.valid) {
-        onShowToast(passCheck.error || 'Informe uma senha válida (mín. 6 caracteres).');
+        fail(passCheck.error || 'Informe uma senha válida (mín. 6 caracteres).');
         return;
       }
     }
 
-    const normalizedPhone = trimmedPhone === '(11) 9' ? '' : trimmedPhone;
-    const hashedNewPassword = trimmedPassword
-      ? await hashPassword(trimmedPassword)
-      : undefined;
+    setIsSavingUser(true);
+    try {
+      const normalizedPhone = trimmedPhone === '(11) 9' ? '' : trimmedPhone;
+      const hashedNewPassword = trimmedPassword
+        ? await hashPassword(trimmedPassword)
+        : undefined;
 
-    if (editingUserId) {
-      const existing = users.find((u) => u.id === editingUserId);
-      if (existing) {
+      if (editingUserId && existing) {
         onUpdateUser({
           ...existing,
           name: trimmedName,
@@ -207,21 +251,30 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
           email: trimmedEmail,
           phone: normalizedPhone,
           password: hashedNewPassword || existing.password,
-          responsibleSector: formSector.trim(),
+          responsibleSector: trimmedSector || '1º andar',
+        });
+      } else {
+        onAddUser({
+          name: trimmedName,
+          role: formRole,
+          email: trimmedEmail,
+          phone: normalizedPhone,
+          password: hashedNewPassword,
+          responsibleSector: trimmedSector || '1º andar',
         });
       }
-    } else {
-      onAddUser({
-        name: trimmedName,
-        role: formRole,
-        email: trimmedEmail,
-        phone: normalizedPhone,
-        password: hashedNewPassword,
-        responsibleSector: formSector.trim(),
-      });
-    }
 
-    setUserModalOpen(false);
+      setUserModalOpen(false);
+    } catch (err) {
+      console.error('Erro ao salvar usuário:', err);
+      fail(
+        err instanceof Error
+          ? err.message
+          : 'Não foi possível salvar as alterações da conta.'
+      );
+    } finally {
+      setIsSavingUser(false);
+    }
   };
 
   const handleConfirmDeleteUser = () => {
@@ -567,7 +620,11 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
                     <th className="py-3 px-4">Telefone</th>
                     <th className="py-3 px-4">Setor</th>
                     <th className="py-3 px-4">Senha</th>
-                    {isAdmin && <th className="py-3 px-4 text-right">Ações</th>}
+                    {isAdmin && (
+                      <th className="py-3 px-4 text-right sticky right-0 bg-slate-50/95 border-l border-slate-200/70">
+                        Ações
+                      </th>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-slate-700">
@@ -579,7 +636,7 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
                     </tr>
                   ) : (
                     filteredUsers.map((u) => (
-                      <tr key={u.id} className="hover:bg-slate-50/80 transition-colors">
+                      <tr key={u.id} className="group hover:bg-slate-50/80 transition-colors">
                         <td className="py-3 px-4 font-semibold text-slate-900">
                           {u.name}
                         </td>
@@ -597,7 +654,7 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
                             {u.role}
                           </span>
                         </td>
-                        <td className="py-3 px-4 text-slate-600">{u.phone}</td>
+                        <td className="py-3 px-4 text-slate-600">{u.phone || '—'}</td>
                         <td className="py-3 px-4 text-slate-600">
                           {u.responsibleSector || 'Geral'}
                         </td>
@@ -605,19 +662,23 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
                           ••••••••
                         </td>
                         {isAdmin && (
-                          <td className="py-3 px-4 text-right">
+                          <td className="py-3 px-4 text-right sticky right-0 bg-white group-hover:bg-slate-50/95 border-l border-slate-100">
                             <div className="flex items-center justify-end gap-1">
                               <button
+                                type="button"
                                 onClick={() => handleOpenEditUser(u)}
-                                className="p-1.5 text-slate-400 hover:text-slate-800 rounded-lg hover:bg-slate-100"
+                                className="p-1.5 text-slate-500 hover:text-slate-900 rounded-lg hover:bg-slate-100 cursor-pointer"
                                 title="Editar dados"
+                                aria-label={`Editar ${u.name}`}
                               >
                                 <Pencil className="w-3.5 h-3.5" />
                               </button>
                               <button
+                                type="button"
                                 onClick={() => setDeleteUserId(u.id)}
-                                className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50"
+                                className="p-1.5 text-slate-500 hover:text-red-600 rounded-lg hover:bg-red-50 cursor-pointer"
                                 title="Excluir usuário"
+                                aria-label={`Excluir ${u.name}`}
                               >
                                 <Trash2 className="w-3.5 h-3.5" />
                               </button>
@@ -797,20 +858,32 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
       {/* USER CREATE / EDIT MODAL */}
       {userModalOpen && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl space-y-5 animate-scaleUp">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl space-y-5 animate-scaleUp max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <h3 className="text-lg font-bold text-red-600">
                 {editingUserId ? 'Editar Usuário / E-mail' : 'Cadastrar Novo Usuário / E-mail'}
               </h3>
               <button
+                type="button"
                 onClick={() => setUserModalOpen(false)}
-                className="text-slate-400 hover:text-slate-700 text-xl font-bold"
+                aria-label="Fechar janela"
+                className="text-slate-400 hover:text-slate-700 text-xl font-bold cursor-pointer"
               >
                 &times;
               </button>
             </div>
 
-            <form onSubmit={handleSaveUser} className="space-y-4">
+            <form onSubmit={handleSaveUser} noValidate className="space-y-4">
+              {modalError && (
+                <div
+                  role="alert"
+                  className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-semibold flex items-start gap-2"
+                >
+                  <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-red-600" />
+                  <span>{modalError}</span>
+                </div>
+              )}
+
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Nome Completo *
@@ -819,7 +892,10 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
                   type="text"
                   required
                   value={formName}
-                  onChange={(e) => setFormName(e.target.value)}
+                  onChange={(e) => {
+                    setFormName(e.target.value);
+                    if (modalError) setModalError(null);
+                  }}
                   placeholder="Ex: Carlos Eduardo Silva"
                   className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-red-500"
                 />
@@ -837,7 +913,10 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
                   </label>
                   <select
                     value={formRole}
-                    onChange={(e) => setFormRole(e.target.value as UserRole)}
+                    onChange={(e) => {
+                      setFormRole(e.target.value as UserRole);
+                      if (modalError) setModalError(null);
+                    }}
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-red-500 bg-white"
                   >
                     <option value="Administrador">Administrador (Total)</option>
@@ -851,9 +930,15 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
                   </label>
                   <select
                     value={formSector}
-                    onChange={(e) => setFormSector(e.target.value)}
+                    onChange={(e) => {
+                      setFormSector(e.target.value);
+                      if (modalError) setModalError(null);
+                    }}
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-red-500 bg-white"
                   >
+                    {formSector && !SENAI_SECTOR_OPTIONS.includes(formSector) && (
+                      <option value={formSector}>{formSector}</option>
+                    )}
                     {SENAI_SECTOR_OPTIONS.map((sec) => (
                       <option key={sec} value={sec}>
                         {sec}
@@ -871,7 +956,10 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
                   type="email"
                   required
                   value={formEmail}
-                  onChange={(e) => setFormEmail(e.target.value)}
+                  onChange={(e) => {
+                    setFormEmail(e.target.value);
+                    if (modalError) setModalError(null);
+                  }}
                   placeholder="usuario@senaisp.edu.br"
                   className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-red-500"
                 />
@@ -891,7 +979,10 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
                     type="text"
                     maxLength={15}
                     value={formPhone}
-                    onChange={(e) => setFormPhone(formatPhone(e.target.value))}
+                    onChange={(e) => {
+                      setFormPhone(formatPhone(e.target.value));
+                      if (modalError) setModalError(null);
+                    }}
                     placeholder="(11) 98765-4321"
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-xl focus:ring-2 focus:ring-red-500"
                   />
@@ -913,7 +1004,10 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
                       type={showPassword ? 'text' : 'password'}
                       required={!editingUserId}
                       value={formPassword}
-                      onChange={(e) => setFormPassword(e.target.value)}
+                      onChange={(e) => {
+                        setFormPassword(e.target.value);
+                        if (modalError) setModalError(null);
+                      }}
                       placeholder={
                         editingUserId
                           ? 'Manter ou digitar nova senha'
@@ -925,7 +1019,8 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
                     <button
                       type="button"
                       onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                      aria-label={showPassword ? 'Ocultar senha' : 'Mostrar senha'}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 cursor-pointer"
                     >
                       {showPassword ? (
                         <EyeOff className="w-3.5 h-3.5" />
@@ -941,15 +1036,17 @@ export const DatabaseView: React.FC<DatabaseViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setUserModalOpen(false)}
-                  className="px-4 py-2 border border-slate-300 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-50"
+                  disabled={isSavingUser}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 rounded-xl text-xs font-semibold hover:bg-slate-50 disabled:opacity-60 cursor-pointer"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
-                  className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-xs"
+                  disabled={isSavingUser}
+                  className="px-6 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-xs disabled:opacity-60 cursor-pointer"
                 >
-                  Salvar no Banco
+                  {isSavingUser ? 'Salvando...' : 'Salvar no Banco'}
                 </button>
               </div>
             </form>

@@ -285,12 +285,16 @@ export default function App() {
   };
 
   const handleUpdateUser = (updatedUser: RegisteredUser) => {
-    const existingDbUser = dbUsers.getAll().find((u) => u.id === updatedUser.id);
+    const existingDbUser =
+      dbUsers.getAll().find((u) => u.id === updatedUser.id) ||
+      users.find((u) => u.id === updatedUser.id);
     const userToSave: RegisteredUser = {
       ...updatedUser,
       password: updatedUser.password || existingDbUser?.password,
     };
-    dbUsers.update(userToSave);
+    dbUsers.update(userToSave, () => {
+      showToast('Salvo localmente, mas houve falha ao sincronizar com a nuvem.');
+    });
     setUsers(dbUsers.getAll());
     if (user && user.id === updatedUser.id) {
       const merged = sanitizeUserForSession({ ...user, ...userToSave });
@@ -653,7 +657,7 @@ export default function App() {
           role="status"
           aria-live="polite"
           aria-atomic="true"
-          className="fixed top-5 right-5 z-50 bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg animate-fadeIn flex items-center gap-2"
+          className="fixed top-5 right-5 z-[60] bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-lg animate-fadeIn flex items-center gap-2"
         >
           <span>{toastMessage}</span>
         </div>

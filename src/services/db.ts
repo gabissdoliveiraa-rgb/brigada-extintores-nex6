@@ -194,12 +194,14 @@ export function cleanForFirestore<T>(data: T): T {
     return data;
   }
   if (Array.isArray(data)) {
-    return data.map((item) => cleanForFirestore(item)) as unknown as T;
+    return data
+      .filter((item) => item !== undefined && item !== null)
+      .map((item) => cleanForFirestore(item)) as unknown as T;
   }
   if (typeof data === 'object') {
     const clean: Record<string, any> = {};
     for (const [key, value] of Object.entries(data as Record<string, any>)) {
-      if (value !== undefined) {
+      if (value !== undefined && value !== null) {
         clean[key] = cleanForFirestore(value);
       }
     }
@@ -254,20 +256,25 @@ export const dbUsers = {
 
     return newUser;
   },
-  update: (user: RegisteredUser): void => {
+  update: (user: RegisteredUser, onFirestoreError?: (err: unknown) => void): void => {
     const list = dbUsers.getAll();
-    const updated = list.map((u) => (u.id === user.id ? user : u));
+    const exists = list.some((u) => u.id === user.id);
+    const updated = exists
+      ? list.map((u) => (u.id === user.id ? user : u))
+      : [user, ...list];
     saveToStorage(KEYS.USERS, updated);
     notify(listeners.users, updated);
 
     if (db && typeof window !== 'undefined') {
       try {
         const payload = cleanForFirestore(user);
-        setDoc(doc(db, 'users', sanitizeDocId(user.id)), payload).catch((err) =>
-          console.warn('Erro ao atualizar usuário no Firestore:', err)
-        );
+        setDoc(doc(db, 'users', sanitizeDocId(user.id)), payload).catch((err) => {
+          console.warn('Erro ao atualizar usuário no Firestore:', err);
+          onFirestoreError?.(err);
+        });
       } catch (err) {
         console.warn('Erro no update do usuário:', err);
+        onFirestoreError?.(err);
       }
     }
   },
@@ -937,7 +944,10 @@ export function initFirestoreRealtimeSync(): () => void {
           markBrigadeUsersBackfillDone();
         } else {
           const remoteList: RegisteredUser[] = [];
-          snapshot.forEach((d) => remoteList.push(d.data() as RegisteredUser));
+          snapshot.forEach((d) => {
+            const data = d.data() as RegisteredUser;
+            remoteList.push({ ...data, id: data.id || d.id });
+          });
           saveToStorage(KEYS.USERS, remoteList);
           notify(listeners.users, remoteList);
           if (remoteList.some((u) => !isPasswordHashed(u.password))) {

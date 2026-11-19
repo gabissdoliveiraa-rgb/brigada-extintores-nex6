@@ -24,6 +24,7 @@ global.localStorage = {
 };
 
 import {
+  cleanForFirestore,
   dbUsers,
   dbExtinguishers,
   dbBrigade,
@@ -146,4 +147,36 @@ test('INITIAL_USERS includes all 12 brigade members and syncFromBrigadeMembers p
   assert.equal(added.length, 1);
   assert.equal(added[0].id, 'usr_member_custom_99');
   assert.ok(dbUsers.findByEmail('novobrigadista@senaisp.edu.br'));
+});
+
+test('cleanForFirestore removes undefined/null and dbUsers.update upserts missing cache items', () => {
+  resetDatabaseToInitial();
+
+  const sanitized = cleanForFirestore({
+    id: 'usr_test',
+    name: 'Teste',
+    phone: undefined,
+    avatarUrl: null as unknown as string,
+    nested: { a: 1, b: null, c: undefined },
+    tags: ['ok', null, undefined],
+  });
+
+  assert.equal('phone' in sanitized, false);
+  assert.equal('avatarUrl' in sanitized, false);
+  assert.equal('b' in sanitized.nested, false);
+  assert.equal('c' in sanitized.nested, false);
+  assert.deepEqual(sanitized.tags, ['ok']);
+
+  // Upsert a user not yet in local cache
+  dbUsers.update({
+    id: 'usr_remote_only',
+    name: 'Usuário Remoto Editado',
+    role: 'Funcionário',
+    email: 'remoto@senaisp.edu.br',
+    phone: '(11) 95555-1234',
+    responsibleSector: '3º andar',
+  });
+  const updated = dbUsers.findByEmail('remoto@senaisp.edu.br');
+  assert.ok(updated);
+  assert.equal(updated?.name, 'Usuário Remoto Editado');
 });
