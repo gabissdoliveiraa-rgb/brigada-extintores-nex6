@@ -227,12 +227,33 @@ function buildAlertEmailBody(
   return { subject, text };
 }
 
+function isAllowedCorsOrigin(origin: string): boolean {
+  if (!origin) return false;
+  if (/^https:\/\/[a-z0-9-]+\.github\.io$/i.test(origin)) return true;
+  if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin)) return true;
+
+  const extra = (process.env.ALLOWED_ORIGINS || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (extra.includes(origin)) return true;
+
+  if (process.env.APP_URL) {
+    try {
+      if (new URL(process.env.APP_URL).origin === origin) return true;
+    } catch {
+      // Ignore malformed APP_URL
+    }
+  }
+  return false;
+}
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.disable('x-powered-by');
-  app.use((_req, res, next) => {
+  app.use((req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
     res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
@@ -240,6 +261,21 @@ async function startServer() {
       'Permissions-Policy',
       'camera=(self), microphone=(), geolocation=()'
     );
+
+    if (req.path.startsWith('/api/')) {
+      const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
+      if (origin && isAllowedCorsOrigin(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Vary', 'Origin');
+        res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      }
+      if (req.method === 'OPTIONS') {
+        res.status(204).end();
+        return;
+      }
+    }
+
     next();
   });
 
@@ -446,9 +482,86 @@ async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: false,
+        ws: false,
+      },
       appType: 'spa',
     });
+
+    // In dev middleware mode behind the preview proxy, Vite 8's default /@vite/client
+    // attempts to connect a WebSocket to port 24678 and throws an unhandled rejection.
+    // Serve an HMR-disabled client module with full CSS injection and zero WebSocket traffic.
+    app.get('/@vite/client', (_req, res) => {
+      res.type('application/javascript; charset=utf-8').send(`
+const sheetsMap = new Map();
+const linkSheetsMap = new Map();
+if (typeof document !== 'undefined') {
+  document.querySelectorAll('style[data-vite-dev-id]').forEach((el) => {
+    sheetsMap.set(el.getAttribute('data-vite-dev-id'), el);
+  });
+  document.querySelectorAll('link[rel="stylesheet"][data-vite-dev-id]').forEach((el) => {
+    linkSheetsMap.set(el.getAttribute('data-vite-dev-id'), el);
+  });
+}
+let lastInsertedStyle;
+export function updateStyle(id, content) {
+  if (linkSheetsMap.has(id)) return;
+  let style = sheetsMap.get(id);
+  if (!style) {
+    style = document.createElement('style');
+    style.setAttribute('type', 'text/css');
+    style.setAttribute('data-vite-dev-id', id);
+    style.textContent = content;
+    if (!lastInsertedStyle) {
+      document.head.appendChild(style);
+      setTimeout(() => { lastInsertedStyle = undefined; }, 0);
+    } else {
+      lastInsertedStyle.insertAdjacentElement('afterend', style);
+    }
+    lastInsertedStyle = style;
+  } else if (style.textContent !== content) {
+    style.textContent = content;
+  }
+  sheetsMap.set(id, style);
+}
+export function removeStyle(id) {
+  if (linkSheetsMap.has(id)) {
+    document.querySelectorAll('link[rel="stylesheet"][data-vite-dev-id="' + CSS.escape(id) + '"]').forEach((el) => el.remove());
+    linkSheetsMap.delete(id);
+  }
+  const style = sheetsMap.get(id);
+  if (style) {
+    style.remove();
+    sheetsMap.delete(id);
+  }
+}
+export function createHotContext() {
+  const noop = () => {};
+  return {
+    data: {},
+    accept: noop,
+    acceptExports: noop,
+    dispose: noop,
+    prune: noop,
+    invalidate: noop,
+    decline: noop,
+    on: noop,
+    off: noop,
+    send: noop,
+  };
+}
+export function injectQuery(url, queryToInject) {
+  if (url[0] !== '.' && url[0] !== '/') return url;
+  const pathname = url.replace(/[?#].*$/, '');
+  const { search, hash } = new URL(url, 'http://vite.dev');
+  return pathname + '?' + queryToInject + (search ? '&' + search.slice(1) : '') + (hash || '');
+}
+export class ErrorOverlay extends HTMLElement {}
+`);
+    });
+
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');

@@ -48,6 +48,7 @@ import {
   extractRegisteredRecipientEmails,
   fetchServerAlertStatus,
   initAuth,
+  loadCloudAutoEmailSettings,
   markAttentionAlertsSent,
   sendAutomaticServerAttentionEmail,
   syncSentAttentionMapWithCurrentExtinguishers,
@@ -264,7 +265,13 @@ export default function App() {
     setUser(safeUser);
     setCurrentTab('inicio');
     void establishServerSession(safeUser);
-    fetchServerAlertStatus().then(setServerAlertStatus);
+    if (safeUser.role === 'Administrador') {
+      void loadCloudAutoEmailSettings().then(() => {
+        fetchServerAlertStatus().then(setServerAlertStatus);
+      });
+    } else {
+      fetchServerAlertStatus().then(setServerAlertStatus);
+    }
     showToast(`Bem-vindo(a), ${safeUser.name}!`);
     logActivity('Sistema', 'login', `${safeUser.name} realizou login no sistema`, undefined, undefined, safeUser);
   };
@@ -851,11 +858,16 @@ export default function App() {
           {currentTab === 'avisos' && (
             <NoticesView
               isAdmin={user.role === 'Administrador'}
+              adminEmail={user.email}
               notices={dynamicNotices}
               extinguishers={extinguishers}
               recipientEmails={registeredRecipientEmails}
               serverAlertStatus={serverAlertStatus}
               onNavigate={(tab) => setCurrentTab(tab)}
+              onRefreshAlertStatus={() => {
+                fetchServerAlertStatus().then(setServerAlertStatus);
+              }}
+              onShowToast={showToast}
               onOpenAttentionEmailModal={
                 user.role === 'Administrador'
                   ? (items) => void triggerAttentionAlert(items, true)

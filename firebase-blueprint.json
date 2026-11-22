@@ -130,12 +130,31 @@
         "grantedAt": { "type": "string", "maxLength": 60 }
       },
       "required": ["uid", "email", "role"]
+    },
+    "AppSetting": {
+      "title": "AppSetting",
+      "description": "Configurações administrativas de envio de alertas (sem segredos privados)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "emailjsServiceId": { "type": "string", "maxLength": 120 },
+        "emailjsTemplateId": { "type": "string", "maxLength": 120 },
+        "emailjsPublicKey": { "type": "string", "maxLength": 160 },
+        "emailjsSenderEmail": { "type": "string", "maxLength": 160 },
+        "apiBaseUrl": { "type": "string", "maxLength": 300 },
+        "updatedAt": { "type": "string", "maxLength": 60 }
+      },
+      "required": ["id"]
     }
   },
   "firestore": {
     "/admins/{adminUid}": {
       "schema": "AdminRole",
       "description": "Coleção de controle de administradores autenticados no Firebase Auth"
+    },
+    "/app_settings/{settingId}": {
+      "schema": "AppSetting",
+      "description": "Configurações administrativas de envio automático de alertas"
     },
     "/extinguishers/{extinguisherId}": {
       "schema": "Extinguisher",

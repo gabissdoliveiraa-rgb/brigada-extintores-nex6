@@ -192,11 +192,34 @@ service cloud.firestore {
       return isSignedIn() && userData.email == request.auth.token.email;
     }
 
+    function isValidAppSetting(data) {
+      return data.keys().hasAll(['id'])
+        && data.keys().hasOnly([
+          'id', 'emailjsServiceId', 'emailjsTemplateId',
+          'emailjsPublicKey', 'emailjsSenderEmail', 'apiBaseUrl', 'updatedAt'
+        ])
+        && isStrLen(data.id, 1, 128)
+        && isOptStrLen(data, 'emailjsServiceId', 120)
+        && isOptStrLen(data, 'emailjsTemplateId', 120)
+        && isOptStrLen(data, 'emailjsPublicKey', 160)
+        && isOptStrLen(data, 'emailjsSenderEmail', 160)
+        && isOptStrLen(data, 'apiBaseUrl', 300)
+        && isOptStrLen(data, 'updatedAt', 60);
+    }
+
     match /admins/{adminUid} {
       allow get: if isSignedIn() && isValidId(adminUid) && (request.auth.uid == adminUid || isBootstrappedAdmin());
       allow list: if isBootstrappedAdmin();
       allow create, update: if isBootstrappedAdmin() && isValidId(adminUid) && isValidAdminGrant(incoming()) && incoming().uid == adminUid;
       allow delete: if isBootstrappedAdmin() && isValidId(adminUid);
+    }
+
+    match /app_settings/{settingId} {
+      allow get: if isValidId(settingId) && isAdmin();
+      allow list: if false;
+      allow create: if isAdmin() && isValidId(settingId) && isValidAppSetting(incoming());
+      allow update: if isAdmin() && isValidId(settingId) && isValidAppSetting(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin() && isValidId(settingId);
     }
 
     match /extinguishers/{extinguisherId} {
