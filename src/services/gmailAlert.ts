@@ -333,9 +333,9 @@ function sanitizeApiBaseUrl(raw?: string | null): string | null {
 
 export function getConfiguredApiBaseUrl(): string | null {
   if (typeof localStorage !== 'undefined') {
-    const localRaw = localStorage.getItem(API_BASE_URL_STORAGE_KEY);
-    const localSanitized = sanitizeApiBaseUrl(localRaw);
-    if (localSanitized) return localSanitized;
+    // Clear legacy manual overrides so static hosts never call stale cross-origin URLs
+    localStorage.removeItem(API_BASE_URL_STORAGE_KEY);
+    localStorage.removeItem(EMAILJS_STORAGE_KEY);
   }
   const envUrl =
     typeof import.meta !== 'undefined'
@@ -348,6 +348,7 @@ function resolveApiEndpointBase(): string | null {
   const configured = getConfiguredApiBaseUrl();
   if (configured) return configured;
   if (isStaticGitHubPagesHost()) return null;
+  if (typeof window !== 'undefined' && window.location.protocol === 'file:') return null;
   return '';
 }
 
@@ -505,6 +506,46 @@ async function postEmailJsTemplate(
   });
 }
 
+async function sendSingleEmailJsWithRetry(
+  cfg: EmailJsConfig,
+  recipient: string,
+  subject: string,
+  bodyText: string,
+  operatorName: string | undefined,
+  count: number,
+  codes: string
+): Promise<void> {
+  const maxAttempts = 2;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const res = await postEmailJsTemplate(
+        cfg,
+        recipient,
+        subject,
+        bodyText,
+        operatorName,
+        count,
+        codes
+      );
+      if (res.ok) return;
+
+      const errText = await res.text().catch(() => '');
+      const shouldRetry = (res.status === 429 || res.status >= 500) && attempt < maxAttempts;
+      if (shouldRetry) {
+        await new Promise((r) => setTimeout(r, 1200));
+        continue;
+      }
+      throw new Error(errText || `HTTP ${res.status}`);
+    } catch (err) {
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, 1000));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 async function sendViaEmailJs(
   extinguishers: Extinguisher[],
   validRecipients: string[],
@@ -521,11 +562,15 @@ async function sendViaEmailJs(
     const delivered: string[] = [];
     let lastError = '';
 
-    // Send individually to every registered database recipient so EmailJS never
-    // silently drops addresses after the first comma in a multi-recipient field.
-    const results = await Promise.allSettled(
-      validRecipients.map(async (recipient) => {
-        const res = await postEmailJsTemplate(
+    // Send sequentially with a brief pause to avoid EmailJS burst/rate limits
+    // while ensuring every database recipient receives their alert reliably.
+    for (let i = 0; i < validRecipients.length; i++) {
+      const recipient = validRecipients[i];
+      if (i > 0) {
+        await new Promise((r) => setTimeout(r, 300));
+      }
+      try {
+        await sendSingleEmailJsWithRetry(
           cfg,
           recipient,
           subject,
@@ -534,22 +579,13 @@ async function sendViaEmailJs(
           extinguishers.length,
           codes
         );
-        if (!res.ok) {
-          const errText = await res.text().catch(() => '');
-          throw new Error(errText || `HTTP ${res.status}`);
-        }
-        return recipient;
-      })
-    );
-
-    for (const outcome of results) {
-      if (outcome.status === 'fulfilled') {
-        delivered.push(outcome.value);
-      } else {
+        delivered.push(recipient);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
         lastError =
-          outcome.reason instanceof Error
-            ? outcome.reason.message
-            : String(outcome.reason);
+          msg === 'Failed to fetch'
+            ? 'Sem conexão com o serviço de e-mail (EmailJS). Verifique sua internet ou bloqueador de anúncios.'
+            : msg;
       }
     }
 
@@ -565,15 +601,16 @@ async function sendViaEmailJs(
       success: false,
       error:
         lastError ||
-        'Falha ao enviar via EmailJS. Verifique Service ID, Template ID e Public Key.',
+        'Falha ao enviar via EmailJS. Verifique sua conexão e tente novamente.',
     };
   } catch (err) {
+    const msg = err instanceof Error ? err.message : '';
     return {
       success: false,
       error:
-        err instanceof Error
-          ? err.message
-          : 'Erro de conexão ao enviar e-mail via EmailJS.',
+        msg && msg !== 'Failed to fetch'
+          ? msg
+          : 'Erro de conexão ao enviar e-mail via EmailJS. Verifique sua internet ou bloqueador de anúncios.',
     };
   }
 }
@@ -741,7 +778,8 @@ export function clearServerSession(): void {
 export async function sendAutomaticServerAttentionEmail(
   extinguishers: Extinguisher[],
   recipientEmails: string[],
-  operatorName?: string
+  operatorName?: string,
+  preferredProvider?: ServerAlertStatus['provider']
 ): Promise<SendGmailAlertResult & { notConfigured?: boolean }> {
   if (!extinguishers || extinguishers.length === 0) {
     return {
@@ -765,7 +803,13 @@ export async function sendAutomaticServerAttentionEmail(
   const apiBase = resolveApiEndpointBase();
   const emailJsCfg = getEmailJsConfig();
 
-  if (apiBase !== null) {
+  // When EmailJS is active (or on static GitHub Pages), send straight via EmailJS
+  // instead of making an unnecessary backend request that can fail on proxies.
+  const shouldTryBackend =
+    apiBase !== null &&
+    (preferredProvider === 'smtp' || preferredProvider === 'resend' || !emailJsCfg);
+
+  if (shouldTryBackend) {
     try {
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -802,7 +846,7 @@ export async function sendAutomaticServerAttentionEmail(
           };
         }
 
-        if (data.notConfigured && emailJsCfg) {
+        if (emailJsCfg) {
           return await sendViaEmailJs(
             extinguishers,
             validRecipients,
@@ -850,9 +894,7 @@ export async function sendAutomaticServerAttentionEmail(
   return {
     success: false,
     notConfigured: true,
-    error: isStaticGitHubPagesHost()
-      ? 'Configure o EmailJS (ou a URL do servidor backend) na aba Avisos para habilitar o envio automático no GitHub Pages.'
-      : 'Envio automático ainda não configurado.',
+    error: 'Envio automático ainda não configurado.',
   };
 }
 

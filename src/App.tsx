@@ -40,7 +40,6 @@ import { SettingsView } from './components/SettingsView';
 import { DatabaseView } from './components/DatabaseView';
 import { ProfileView } from './components/ProfileView';
 import { HistoryView } from './components/HistoryView';
-import { AttentionEmailConfirmModal } from './components/AttentionEmailConfirmModal';
 import {
   ServerAlertStatus,
   clearServerSession,
@@ -115,11 +114,9 @@ export default function App() {
   const [profileEditing, setProfileEditing] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // Toast feedback state
+  // Toast feedback & automatic email dispatch state
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [attentionEmailTargets, setAttentionEmailTargets] = useState<
-    Extinguisher[]
-  >([]);
+  const [isSendingAttentionEmail, setIsSendingAttentionEmail] = useState(false);
   const [serverAlertStatus, setServerAlertStatus] = useState<ServerAlertStatus>(
     () => getInitialAlertStatus()
   );
@@ -317,6 +314,54 @@ export default function App() {
       showToast('Salvo localmente, mas houve falha ao sincronizar com a nuvem.');
     });
     setUsers(dbUsers.getAll());
+
+    // Synchronize matching BrigadeMember(s) whenever name, e-mail, phone or sector changes
+    const prevEmailLower = (existingDbUser?.email || '').trim().toLowerCase();
+    const prevNameLower = (existingDbUser?.name || '').trim().toLowerCase();
+    const nextEmailLower = (userToSave.email || '').trim().toLowerCase();
+    const validFloors = new Set<BrigadeMember['responsibleFloor']>([
+      'Térreo - Recepção e Portaria',
+      'Térreo - Cantina e Oficinas',
+      '1º andar',
+      '2º andar',
+      '3º andar',
+      '4º andar',
+      '5º andar',
+      '6º andar',
+      'Geral - Toda a unidade SENAI',
+    ]);
+    let syncedAnyBrigadeMember = false;
+    dbBrigade.getAll().forEach((member) => {
+      const mEmail = (member.email || '').trim().toLowerCase();
+      const mName = (member.name || '').trim().toLowerCase();
+      const isMatch =
+        (prevEmailLower && mEmail === prevEmailLower) ||
+        userToSave.id === `usr_${member.id}` ||
+        (nextEmailLower && mEmail === nextEmailLower) ||
+        (prevNameLower && mName === prevNameLower);
+      if (isMatch) {
+        const nextFloor =
+          userToSave.responsibleSector &&
+          validFloors.has(
+            userToSave.responsibleSector as BrigadeMember['responsibleFloor']
+          )
+            ? (userToSave.responsibleSector as BrigadeMember['responsibleFloor'])
+            : member.responsibleFloor;
+        dbBrigade.update({
+          ...member,
+          name: userToSave.name,
+          email: userToSave.email,
+          phone: userToSave.phone || member.phone,
+          responsibleFloor: nextFloor,
+          trainingStatus: userToSave.trainingStatus || member.trainingStatus,
+        });
+        syncedAnyBrigadeMember = true;
+      }
+    });
+    if (syncedAnyBrigadeMember) {
+      setMembers(dbBrigade.getAll());
+    }
+
     if (user.id === updatedUser.id) {
       const merged = sanitizeUserForSession({ ...user, ...userToSave });
       setUser(merged);
@@ -325,6 +370,8 @@ export default function App() {
     showToast(
       user.id === updatedUser.id
         ? 'Seus dados foram atualizados com sucesso!'
+        : syncedAnyBrigadeMember
+        ? `Dados de ${updatedUser.name} atualizados no login e na Brigada!`
         : `Usuário ${updatedUser.name} atualizado no banco.`
     );
     logActivity('Usuários', 'update', `${user.name} atualizou as informações de ${updatedUser.name}`);
@@ -343,49 +390,55 @@ export default function App() {
   };
 
   const triggerAttentionAlert = useCallback(
-    async (targets: Extinguisher[], forceManualFallback = true) => {
+    async (targets: Extinguisher[]) => {
       if (!user || user.role !== 'Administrador') return;
       if (!targets || targets.length === 0) return;
-      const recipients = extractRegisteredRecipientEmails([...users, ...members]);
 
-      if (serverAlertStatus.autoEmailConfigured && recipients.length > 0) {
-        if (isAutoSendingRef.current) return;
-        isAutoSendingRef.current = true;
-        try {
-          const result = await sendAutomaticServerAttentionEmail(
-            targets,
-            recipients,
-            user?.name
-          );
-          if (result.success) {
-            markAttentionAlertsSent(targets);
-            const sentTo = result.recipients || recipients;
-            const codes = targets.map((e) => e.code);
-            showToast(
-              `Alerta automático enviado para ${sentTo.length} e-mail(s) do banco!`
-            );
-            logActivity(
-              'Sistema',
-              'system',
-              `Sistema enviou alerta automático para ${sentTo.join(', ')} referente a ${targets.length} extintor(es) em Atenção (${codes.join(', ')})`
-            );
-            return;
-          }
-          if (forceManualFallback) {
-            showToast(result.error || 'Falha no envio automático. Abrindo envio via Gmail...');
-            setAttentionEmailTargets(targets);
-          }
-        } finally {
-          isAutoSendingRef.current = false;
-        }
+      const currentUsers = dbUsers.getAll();
+      const currentMembers = dbBrigade.getAll();
+      const recipients = extractRegisteredRecipientEmails([
+        ...currentUsers,
+        ...currentMembers,
+      ]);
+
+      if (recipients.length === 0) {
+        showToast('Nenhum e-mail válido cadastrado no banco de dados para receber o alerta.');
         return;
       }
 
-      if (forceManualFallback) {
-        setAttentionEmailTargets(targets);
+      if (isAutoSendingRef.current) return;
+      isAutoSendingRef.current = true;
+      setIsSendingAttentionEmail(true);
+      try {
+        const result = await sendAutomaticServerAttentionEmail(
+          targets,
+          recipients,
+          user?.name,
+          serverAlertStatus.provider
+        );
+        if (result.success) {
+          markAttentionAlertsSent(targets);
+          const sentTo = result.recipients || recipients;
+          const codes = targets.map((e) => e.code);
+          showToast(
+            `E-mail de alerta enviado para ${sentTo.length} destinatário(s) do banco!`
+          );
+          logActivity(
+            'Sistema',
+            'system',
+            `${user.name} enviou alerta automático para ${sentTo.join(', ')} referente a ${targets.length} extintor(es) em Atenção (${codes.join(', ')})`
+          );
+          return;
+        }
+        showToast(
+          result.error || 'Não foi possível enviar o e-mail de alerta no momento.'
+        );
+      } finally {
+        isAutoSendingRef.current = false;
+        setIsSendingAttentionEmail(false);
       }
     },
-    [users, members, serverAlertStatus.autoEmailConfigured, user]
+    [serverAlertStatus.provider, user]
   );
 
   // Keep sent-alert map aligned when extinguishers leave Atenção (never auto-send on login/mount)
@@ -435,7 +488,7 @@ export default function App() {
       newExt.floor
     );
     if (newExt.status === 'Atenção') {
-      void triggerAttentionAlert([newExt], true);
+      void triggerAttentionAlert([newExt]);
     }
   };
 
@@ -479,7 +532,7 @@ export default function App() {
       updated.status === 'Atenção' &&
       previousExt?.status !== 'Atenção'
     ) {
-      void triggerAttentionAlert([updated], true);
+      void triggerAttentionAlert([updated]);
     }
   };
 
@@ -561,7 +614,7 @@ export default function App() {
         expirationDate: updated.validityDate,
         nextInspectionDate: updated.nextInspectionDate,
       };
-      void triggerAttentionAlert([targetForEmail], true);
+      void triggerAttentionAlert([targetForEmail]);
     }
   };
 
@@ -592,9 +645,54 @@ export default function App() {
       showToast('Apenas administradores podem editar membros.');
       return;
     }
+    const previousMember =
+      dbBrigade.getAll().find((m) => m.id === updated.id) ||
+      members.find((m) => m.id === updated.id);
+
     dbBrigade.update(updated);
     setMembers(dbBrigade.getAll());
-    showToast(`Dados de ${updated.name} atualizados.`);
+
+    // Synchronize matching RegisteredUser login account when brigade member info/email changes
+    const prevEmailLower = (previousMember?.email || '').trim().toLowerCase();
+    const prevNameLower = (previousMember?.name || '').trim().toLowerCase();
+    const nextEmailLower = (updated.email || '').trim().toLowerCase();
+    const allUsers = dbUsers.getAll();
+    const matchingUser = allUsers.find((u) => {
+      const uEmail = (u.email || '').trim().toLowerCase();
+      const uName = (u.name || '').trim().toLowerCase();
+      return (
+        (prevEmailLower && uEmail === prevEmailLower) ||
+        u.id === `usr_${updated.id}` ||
+        (nextEmailLower && uEmail === nextEmailLower) ||
+        (prevNameLower && uName === prevNameLower)
+      );
+    });
+
+    if (matchingUser) {
+      const syncedUser: RegisteredUser = {
+        ...matchingUser,
+        name: updated.name,
+        email: updated.email.trim(),
+        phone: updated.phone || matchingUser.phone,
+        responsibleSector: updated.responsibleFloor || matchingUser.responsibleSector,
+        isLeader: updated.isLeader,
+        trainingStatus: updated.trainingStatus,
+      };
+      dbUsers.update(syncedUser);
+      setUsers(dbUsers.getAll());
+      if (user.id === syncedUser.id) {
+        const merged = sanitizeUserForSession({ ...user, ...syncedUser });
+        setUser(merged);
+        localStorage.setItem('senai_brigada_user', JSON.stringify(merged));
+      }
+    } else {
+      const created = dbUsers.syncFromBrigadeMembers([updated]);
+      if (created.length > 0) {
+        setUsers(dbUsers.getAll());
+      }
+    }
+
+    showToast(`Dados de ${updated.name} atualizados na Brigada e no login.`);
     logActivity(
       'Brigada',
       'update',
@@ -768,7 +866,7 @@ export default function App() {
               onDeleteExtinguisher={handleDeleteExtinguisher}
               onRequestSendAttentionEmail={
                 user.role === 'Administrador'
-                  ? (items) => void triggerAttentionAlert(items, true)
+                  ? (items) => void triggerAttentionAlert(items)
                   : undefined
               }
             />
@@ -857,10 +955,11 @@ export default function App() {
               extinguishers={extinguishers}
               recipientEmails={registeredRecipientEmails}
               serverAlertStatus={serverAlertStatus}
+              isSendingEmail={isSendingAttentionEmail}
               onNavigate={(tab) => setCurrentTab(tab)}
-              onOpenAttentionEmailModal={
+              onSendAttentionEmail={
                 user.role === 'Administrador'
-                  ? (items) => void triggerAttentionAlert(items, true)
+                  ? (items) => void triggerAttentionAlert(items)
                   : undefined
               }
             />
@@ -892,27 +991,6 @@ export default function App() {
           )}
         </main>
       </div>
-
-      {/* Gmail Confirmation Modal for Extinguishers in Atenção (Admin only) */}
-      {user.role === 'Administrador' && (
-        <AttentionEmailConfirmModal
-          isOpen={attentionEmailTargets.length > 0}
-          extinguishers={attentionEmailTargets}
-          recipientEmails={registeredRecipientEmails}
-          user={user}
-          onClose={() => setAttentionEmailTargets([])}
-          onEmailSent={(count, codes, recipients) => {
-            showToast(
-              `E-mail de alerta enviado para ${recipients.length} destinatário(s) do banco!`
-            );
-            logActivity(
-              'Sistema',
-              'system',
-              `${user.name} enviou alerta por e-mail para ${recipients.join(', ')} referente a ${count} extintor(es) em Atenção (${codes.join(', ')})`
-            );
-          }}
-        />
-      )}
     </div>
   );
 }

@@ -17,6 +17,7 @@ import {
   Send,
   Server,
   Globe,
+  Loader2,
 } from 'lucide-react';
 import { ViewTab } from './Sidebar';
 
@@ -26,8 +27,9 @@ interface NoticesViewProps {
   extinguishers?: Extinguisher[];
   recipientEmails?: string[];
   serverAlertStatus?: ServerAlertStatus;
+  isSendingEmail?: boolean;
   onNavigate: (tab: ViewTab) => void;
-  onOpenAttentionEmailModal?: (items: Extinguisher[]) => void;
+  onSendAttentionEmail?: (items: Extinguisher[]) => void;
 }
 
 export const NoticesView: React.FC<NoticesViewProps> = ({
@@ -36,8 +38,9 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
   extinguishers = [],
   recipientEmails = [],
   serverAlertStatus,
+  isSendingEmail = false,
   onNavigate,
-  onOpenAttentionEmailModal,
+  onSendAttentionEmail,
 }) => {
   const [filter, setFilter] = useState<'Todos' | 'Vencido' | 'A vencer'>('Todos');
 
@@ -108,16 +111,25 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
             </p>
           </div>
 
-          {isAdmin && onOpenAttentionEmailModal && (
+          {isAdmin && onSendAttentionEmail && (
             <div className="flex flex-wrap items-center gap-2.5 shrink-0">
               <button
                 type="button"
-                disabled={attentionExtinguishers.length === 0}
-                onClick={() => onOpenAttentionEmailModal(attentionExtinguishers)}
+                disabled={attentionExtinguishers.length === 0 || isSendingEmail}
+                onClick={() => onSendAttentionEmail(attentionExtinguishers)}
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
               >
-                <Send className="w-3.5 h-3.5" />
-                <span>{`Reenviar Agora (${attentionExtinguishers.length})`}</span>
+                {isSendingEmail ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    <span>Enviando e-mails...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-3.5 h-3.5" />
+                    <span>{`Reenviar Agora (${attentionExtinguishers.length})`}</span>
+                  </>
+                )}
               </button>
             </div>
           )}
