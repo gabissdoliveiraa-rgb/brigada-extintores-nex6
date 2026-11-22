@@ -147,12 +147,19 @@ export const BrigadeView: React.FC<BrigadeViewProps> = ({
     }
   };
 
+  const TRAINING_DATE_OPTIONS = {
+    allowFuture: true,
+    minYear: 2000,
+    maxYear: 2100,
+    requiredMessage: 'Data de vencimento é obrigatória',
+  };
+
   // Automatic date mask, live validation, and auto-sync training status
   const handleDateChange = (val: string) => {
     const formatted = formatDate(val);
     setFormTrainingExpiration(formatted);
     if (formatted.length === 10) {
-      const chk = validateDate(formatted);
+      const chk = validateDate(formatted, TRAINING_DATE_OPTIONS);
       setFormErrors((prev) => ({ ...prev, date: chk.valid ? undefined : chk.error }));
       if (chk.valid) {
         const days = getDaysUntilDate(formatted);
@@ -181,7 +188,9 @@ export const BrigadeView: React.FC<BrigadeViewProps> = ({
     const nameChk = validateName(formName);
     const phoneChk = validatePhone(formPhone);
     const emailChk = validateEmail(formEmail);
-    const dateChk = formTrainingExpiration ? validateDate(formTrainingExpiration) : { valid: true };
+    const dateChk = formTrainingExpiration
+      ? validateDate(formTrainingExpiration, TRAINING_DATE_OPTIONS)
+      : { valid: true };
 
     const errors = {
       name: nameChk.valid ? undefined : nameChk.error,

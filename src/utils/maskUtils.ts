@@ -76,16 +76,33 @@ export function validateEmail(email: string): { valid: boolean; error?: string }
   return { valid: true };
 }
 
+export interface ValidateDateOptions {
+  allowFuture?: boolean;
+  minYear?: number;
+  maxYear?: number;
+  requiredMessage?: string;
+}
+
 /**
- * Validates Date format (DD/MM/AAAA) with realistic day and month
+ * Validates Date format (DD/MM/AAAA) with realistic day, month, and calendar check
  */
-export function validateDate(dateStr: string): { valid: boolean; error?: string } {
+export function validateDate(
+  dateStr: string,
+  options: ValidateDateOptions = {}
+): { valid: boolean; error?: string } {
+  const {
+    allowFuture = false,
+    minYear = 1920,
+    maxYear = allowFuture ? 2100 : new Date().getFullYear(),
+    requiredMessage = 'Data de nascimento é obrigatória',
+  } = options;
+
   const trimmed = dateStr.trim();
   if (!trimmed) {
-    return { valid: false, error: 'Data de nascimento é obrigatória' };
+    return { valid: false, error: requiredMessage };
   }
   const parts = trimmed.split('/');
-  if (parts.length !== 3) {
+  if (parts.length !== 3 || parts[2].length !== 4) {
     return { valid: false, error: 'Data inválida (formato: DD/MM/AAAA)' };
   }
   const day = parseInt(parts[0], 10);
@@ -101,11 +118,25 @@ export function validateDate(dateStr: string): { valid: boolean; error?: string 
   if (day < 1 || day > 31) {
     return { valid: false, error: 'Dia inválido (deve ser entre 01 e 31)' };
   }
-  const currentYear = new Date().getFullYear();
-  if (year < 1920 || year > currentYear) {
-    return { valid: false, error: `Ano deve estar entre 1920 e ${currentYear}` };
+  const parsed = new Date(year, month - 1, day);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day
+  ) {
+    return { valid: false, error: 'Data inexistente no calendário' };
+  }
+  if (year < minYear || year > maxYear) {
+    return { valid: false, error: `Ano deve estar entre ${minYear} e ${maxYear}` };
   }
   return { valid: true };
+}
+
+/**
+ * Boolean helper for checking DD/MM/AAAA strings (allows future expiration dates by default).
+ */
+export function isValidBrDate(dateStr: string, allowFuture = true): boolean {
+  return validateDate(dateStr, { allowFuture }).valid;
 }
 
 /**

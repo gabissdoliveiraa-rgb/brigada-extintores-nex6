@@ -11,6 +11,7 @@ import {
   validatePhone,
   validateEmail,
   validateDate,
+  isValidBrDate,
   validateName,
 } from './maskUtils';
 
@@ -56,6 +57,10 @@ test('validateDate validates realistic days and months', () => {
   assert.equal(validateDate('32/01/2000').valid, false);
   assert.equal(validateDate('15/13/2000').valid, false);
   assert.equal(validateDate('27/07/2000').valid, true);
+  assert.equal(validateDate('15/08/2028', { allowFuture: true }).valid, true);
+  assert.equal(validateDate('30/11/2035', { allowFuture: true }).valid, true);
+  assert.equal(isValidBrDate('15/08/2028', true), true);
+  assert.equal(isValidBrDate('31/02/2028', true), false);
 });
 
 test('validateName rejects numbers or short names', () => {

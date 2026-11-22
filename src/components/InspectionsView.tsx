@@ -10,7 +10,7 @@ import {
   Inspection,
   UserProfile,
 } from '../types/brigada';
-import { formatDate, validateDate } from '../utils/maskUtils';
+import { formatDate, isValidBrDate } from '../utils/maskUtils';
 import {
   canPerformAdminAction,
   computeStatusFromValidity,
@@ -56,7 +56,7 @@ function formatOffsetBrDate(daysOffset: number): string {
 }
 
 function getEffectiveInspectionStatus(insp: Inspection): ExtinguisherStatus {
-  if (validateDate(insp.validityDate) || validateDate(insp.nextInspectionDate)) {
+  if (isValidBrDate(insp.validityDate, true) || isValidBrDate(insp.nextInspectionDate, true)) {
     return computeStatusFromValidity(insp.validityDate, insp.nextInspectionDate);
   }
   return insp.status;
@@ -137,7 +137,7 @@ export const InspectionsView: React.FC<InspectionsViewProps> = ({
   const handleValidityDateChange = (raw: string) => {
     const formatted = formatDate(raw);
     setEditValidityDate(formatted);
-    if (validateDate(formatted) || validateDate(editNextInspectionDate)) {
+    if (isValidBrDate(formatted, true) || isValidBrDate(editNextInspectionDate, true)) {
       setEditStatus(computeStatusFromValidity(formatted, editNextInspectionDate));
     }
   };
@@ -145,7 +145,7 @@ export const InspectionsView: React.FC<InspectionsViewProps> = ({
   const handleNextInspectionDateChange = (raw: string) => {
     const formatted = formatDate(raw);
     setEditNextInspectionDate(formatted);
-    if (validateDate(editValidityDate) || validateDate(formatted)) {
+    if (isValidBrDate(editValidityDate, true) || isValidBrDate(formatted, true)) {
       setEditStatus(computeStatusFromValidity(editValidityDate, formatted));
     }
   };
@@ -178,7 +178,7 @@ export const InspectionsView: React.FC<InspectionsViewProps> = ({
     if (!isAdmin || !activeInspection) return;
 
     const syncedStatus =
-      validateDate(editValidityDate) || validateDate(editNextInspectionDate)
+      isValidBrDate(editValidityDate, true) || isValidBrDate(editNextInspectionDate, true)
         ? computeStatusFromValidity(editValidityDate, editNextInspectionDate)
         : editStatus;
 
@@ -271,12 +271,12 @@ export const InspectionsView: React.FC<InspectionsViewProps> = ({
                       onChange={(e) => setEditDate(formatDate(e.target.value))}
                       placeholder="DD/MM/AAAA"
                       className={`w-full px-3 py-2 text-sm bg-white border rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-red-500 ${
-                        editDate && !validateDate(editDate)
+                        editDate && !isValidBrDate(editDate, true)
                           ? 'border-red-400'
                           : 'border-slate-300'
                       }`}
                     />
-                    {editDate && !validateDate(editDate) && (
+                    {editDate && !isValidBrDate(editDate, true) && (
                       <p className="text-[11px] text-red-600 mt-1 font-medium">
                         Data inválida (formato DD/MM/AAAA)
                       </p>
@@ -399,7 +399,7 @@ export const InspectionsView: React.FC<InspectionsViewProps> = ({
                         placeholder="DD/MM/AAAA"
                         className="w-full px-2 py-1 text-xs border border-slate-300 rounded mt-0.5 font-mono"
                       />
-                      {editValidityDate && !validateDate(editValidityDate) && (
+                      {editValidityDate && !isValidBrDate(editValidityDate, true) && (
                         <p className="text-[11px] text-red-600 mt-0.5 font-medium">
                           Data inválida
                         </p>
@@ -422,7 +422,7 @@ export const InspectionsView: React.FC<InspectionsViewProps> = ({
                         className="w-full px-2 py-1 text-xs border border-slate-300 rounded mt-0.5 font-mono"
                       />
                       {editNextInspectionDate &&
-                        !validateDate(editNextInspectionDate) && (
+                        !isValidBrDate(editNextInspectionDate, true) && (
                           <p className="text-[11px] text-red-600 mt-0.5 font-medium">
                             Data inválida
                           </p>

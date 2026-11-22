@@ -16,7 +16,7 @@ import {
   filterExtinguishersByFloor,
   getDaysUntilDate,
 } from '../utils/brigadaLogic';
-import { formatDate, validateDate } from '../utils/maskUtils';
+import { formatDate, isValidBrDate } from '../utils/maskUtils';
 import { ExtinguisherIcon } from './ExtinguisherIcon';
 import { QrCameraScanner } from './QrCameraScanner';
 import { ExtinguisherQrModal } from './ExtinguisherQrModal';
@@ -203,7 +203,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
   const handleExpirationChange = (raw: string) => {
     const formatted = formatDate(raw);
     setFormExpirationDate(formatted);
-    if (validateDate(formatted) || validateDate(formNextInspectionDate)) {
+    if (isValidBrDate(formatted, true) || isValidBrDate(formNextInspectionDate, true)) {
       setFormStatus(computeStatusFromValidity(formatted, formNextInspectionDate));
     }
   };
@@ -211,7 +211,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
   const handleNextInspectionChange = (raw: string) => {
     const formatted = formatDate(raw);
     setFormNextInspectionDate(formatted);
-    if (validateDate(formExpirationDate) || validateDate(formatted)) {
+    if (isValidBrDate(formExpirationDate, true) || isValidBrDate(formatted, true)) {
       setFormStatus(computeStatusFromValidity(formExpirationDate, formatted));
     }
   };
@@ -278,7 +278,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
   const handleStartEdit = (ext: Extinguisher) => {
     if (!isAdmin) return;
     const effective =
-      validateDate(ext.expirationDate || '') || validateDate(ext.nextInspectionDate || '')
+      isValidBrDate(ext.expirationDate || '', true) || isValidBrDate(ext.nextInspectionDate || '', true)
         ? computeStatusFromValidity(ext.expirationDate, ext.nextInspectionDate)
         : ext.status;
     setActiveExtinguisher(ext);
@@ -300,7 +300,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
     if (!isAdmin || !formCode.trim()) return;
 
     const computedStatus =
-      validateDate(formExpirationDate) || validateDate(formNextInspectionDate)
+      isValidBrDate(formExpirationDate, true) || isValidBrDate(formNextInspectionDate, true)
         ? computeStatusFromValidity(formExpirationDate, formNextInspectionDate)
         : formStatus;
 
@@ -331,7 +331,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
     if (!isAdmin || !activeExtinguisher) return;
 
     const computedStatus =
-      validateDate(formExpirationDate) || validateDate(formNextInspectionDate)
+      isValidBrDate(formExpirationDate, true) || isValidBrDate(formNextInspectionDate, true)
         ? computeStatusFromValidity(formExpirationDate, formNextInspectionDate)
         : formStatus;
 
@@ -538,7 +538,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
                       onChange={(e) => setFormPurchaseDate(formatDate(e.target.value))}
                       placeholder="DD/MM/AAAA"
                       className={`w-full px-4 py-3 text-sm bg-white border rounded-xl focus:outline-none focus:ring-2 placeholder:text-slate-400 text-slate-900 ${
-                        formPurchaseDate && !validateDate(formPurchaseDate)
+                        formPurchaseDate && !isValidBrDate(formPurchaseDate, false)
                           ? 'border-red-400 focus:ring-red-500'
                           : 'border-slate-300 focus:ring-red-500'
                       }`}
@@ -802,7 +802,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
                     placeholder="DD/MM/AAAA"
                     className="w-full px-3.5 py-2.5 text-sm bg-white border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-red-500"
                   />
-                  {formPurchaseDate && !validateDate(formPurchaseDate) && (
+                  {formPurchaseDate && !isValidBrDate(formPurchaseDate, false) && (
                     <p className="text-[11px] text-red-600 mt-1 font-medium">
                       Data inválida (DD/MM/AAAA)
                     </p>
