@@ -409,26 +409,51 @@ async function startServer() {
           host: cfg.smtpHost,
           port: cfg.smtpPort,
           secure: cfg.smtpPort === 465,
+          pool: true,
+          maxConnections: 3,
           auth: {
             user: cfg.senderEmail,
             pass: cfg.smtpPass,
           },
         });
 
-        const info = await transporter.sendMail({
-          from: `"SENAI Brigada & Extintores" <${cfg.senderEmail}>`,
-          to: recipients.join(', '),
-          subject,
-          text,
-        });
+        try {
+          const acceptedRecipients: string[] = [];
+          let lastMessageId: string | undefined;
 
-        res.json({
-          success: true,
-          provider: 'smtp',
-          messageId: info.messageId,
-          recipients,
-        });
-        return;
+          for (const recipient of recipients) {
+            try {
+              const info = await transporter.sendMail({
+                from: `"SENAI Brigada & Extintores" <${cfg.senderEmail}>`,
+                to: recipient,
+                subject,
+                text,
+              });
+              acceptedRecipients.push(recipient);
+              lastMessageId = info.messageId;
+            } catch (singleErr) {
+              console.warn(`Falha ao enviar alerta SMTP para ${recipient}:`, singleErr);
+            }
+          }
+
+          if (acceptedRecipients.length === 0) {
+            res.status(502).json({
+              success: false,
+              error: 'Nenhum destinatário pôde receber o e-mail pelo servidor SMTP.',
+            });
+            return;
+          }
+
+          res.json({
+            success: true,
+            provider: 'smtp',
+            messageId: lastMessageId,
+            recipients: acceptedRecipients,
+          });
+          return;
+        } finally {
+          transporter.close();
+        }
       }
 
       if (cfg.provider === 'resend') {

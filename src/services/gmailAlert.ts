@@ -359,38 +359,20 @@ const DEFAULT_EMAILJS_CONFIG: EmailJsConfig = {
 };
 
 export function getEmailJsConfig(): EmailJsConfig | null {
-  let serviceId = '';
-  let templateId = '';
-  let publicKey = '';
-  let senderEmail = '';
-
-  if (typeof localStorage !== 'undefined') {
-    try {
-      const raw = localStorage.getItem(EMAILJS_STORAGE_KEY);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Partial<EmailJsConfig>;
-        serviceId = (parsed.serviceId || '').trim();
-        templateId = (parsed.templateId || '').trim();
-        publicKey = (parsed.publicKey || '').trim();
-        senderEmail = (parsed.senderEmail || '').trim();
-      }
-    } catch {
-      // Ignore malformed localStorage cache
-    }
-  }
-
-  if (!serviceId || !templateId || !publicKey) {
-    const env = typeof import.meta !== 'undefined' ? import.meta.env : undefined;
-    serviceId = serviceId || ((env?.VITE_EMAILJS_SERVICE_ID as string | undefined) || '').trim();
-    templateId = templateId || ((env?.VITE_EMAILJS_TEMPLATE_ID as string | undefined) || '').trim();
-    publicKey = publicKey || ((env?.VITE_EMAILJS_PUBLIC_KEY as string | undefined) || '').trim();
-    senderEmail = senderEmail || ((env?.VITE_EMAILJS_SENDER_EMAIL as string | undefined) || '').trim();
-  }
-
-  serviceId = serviceId || DEFAULT_EMAILJS_CONFIG.serviceId;
-  templateId = templateId || DEFAULT_EMAILJS_CONFIG.templateId;
-  publicKey = publicKey || DEFAULT_EMAILJS_CONFIG.publicKey;
-  senderEmail = senderEmail || DEFAULT_EMAILJS_CONFIG.senderEmail || '';
+  const env = typeof import.meta !== 'undefined' ? import.meta.env : undefined;
+  const serviceId =
+    ((env?.VITE_EMAILJS_SERVICE_ID as string | undefined) || '').trim() ||
+    DEFAULT_EMAILJS_CONFIG.serviceId;
+  const templateId =
+    ((env?.VITE_EMAILJS_TEMPLATE_ID as string | undefined) || '').trim() ||
+    DEFAULT_EMAILJS_CONFIG.templateId;
+  const publicKey =
+    ((env?.VITE_EMAILJS_PUBLIC_KEY as string | undefined) || '').trim() ||
+    DEFAULT_EMAILJS_CONFIG.publicKey;
+  const senderEmail =
+    ((env?.VITE_EMAILJS_SENDER_EMAIL as string | undefined) || '').trim() ||
+    DEFAULT_EMAILJS_CONFIG.senderEmail ||
+    '';
 
   if (!serviceId || !templateId || !publicKey) return null;
   return {
@@ -536,29 +518,14 @@ async function sendViaEmailJs(
   const codes = extinguishers.map((e) => e.code).join(', ');
 
   try {
-    const res = await postEmailJsTemplate(
-      cfg,
-      validRecipients.join(', '),
-      subject,
-      bodyText,
-      operatorName,
-      extinguishers.length,
-      codes
-    );
+    const delivered: string[] = [];
+    let lastError = '';
 
-    if (res.ok) {
-      return {
-        success: true,
-        messageId: 'emailjs-ok',
-        recipients: validRecipients,
-      };
-    }
-
-    // Fallback: if EmailJS template only accepts one address per request, send per recipient
-    if (validRecipients.length > 1 && (res.status === 400 || res.status === 422)) {
-      const delivered: string[] = [];
-      for (const recipient of validRecipients) {
-        const singleRes = await postEmailJsTemplate(
+    // Send individually to every registered database recipient so EmailJS never
+    // silently drops addresses after the first comma in a multi-recipient field.
+    const results = await Promise.allSettled(
+      validRecipients.map(async (recipient) => {
+        const res = await postEmailJsTemplate(
           cfg,
           recipient,
           subject,
@@ -567,25 +534,38 @@ async function sendViaEmailJs(
           extinguishers.length,
           codes
         );
-        if (singleRes.ok) {
-          delivered.push(recipient);
+        if (!res.ok) {
+          const errText = await res.text().catch(() => '');
+          throw new Error(errText || `HTTP ${res.status}`);
         }
-      }
-      if (delivered.length > 0) {
-        return {
-          success: true,
-          messageId: 'emailjs-batch-ok',
-          recipients: delivered,
-        };
+        return recipient;
+      })
+    );
+
+    for (const outcome of results) {
+      if (outcome.status === 'fulfilled') {
+        delivered.push(outcome.value);
+      } else {
+        lastError =
+          outcome.reason instanceof Error
+            ? outcome.reason.message
+            : String(outcome.reason);
       }
     }
 
-    const errText = await res.text().catch(() => '');
+    if (delivered.length > 0) {
+      return {
+        success: true,
+        messageId: 'emailjs-ok',
+        recipients: delivered,
+      };
+    }
+
     return {
       success: false,
       error:
-        errText ||
-        `Falha ao enviar via EmailJS (HTTP ${res.status}). Verifique Service ID, Template ID e Public Key.`,
+        lastError ||
+        'Falha ao enviar via EmailJS. Verifique Service ID, Template ID e Public Key.',
     };
   } catch (err) {
     return {
@@ -648,6 +628,30 @@ export async function sendTestEmailViaEmailJs(
   }
 }
 
+export function getInitialAlertStatus(): ServerAlertStatus {
+  const isStaticHost = isStaticGitHubPagesHost();
+  const configuredApiUrl = getConfiguredApiBaseUrl();
+  const emailJsCfg = getEmailJsConfig();
+
+  if (emailJsCfg) {
+    return {
+      autoEmailConfigured: true,
+      provider: 'emailjs',
+      senderEmail: emailJsCfg.senderEmail || 'nex6empresa@gmail.com',
+      apiBaseUrl: configuredApiUrl,
+      isStaticHost,
+    };
+  }
+
+  return {
+    autoEmailConfigured: false,
+    provider: null,
+    senderEmail: null,
+    apiBaseUrl: configuredApiUrl,
+    isStaticHost,
+  };
+}
+
 export async function fetchServerAlertStatus(): Promise<ServerAlertStatus> {
   const isStaticHost = isStaticGitHubPagesHost();
   const apiBase = resolveApiEndpointBase();
@@ -686,7 +690,7 @@ export async function fetchServerAlertStatus(): Promise<ServerAlertStatus> {
     return {
       autoEmailConfigured: true,
       provider: 'emailjs',
-      senderEmail: emailJsCfg.senderEmail || 'EmailJS (GitHub Pages)',
+      senderEmail: emailJsCfg.senderEmail || 'nex6empresa@gmail.com',
       apiBaseUrl: configuredApiUrl,
       isStaticHost,
     };

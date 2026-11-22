@@ -47,8 +47,8 @@ import {
   establishServerSession,
   extractRegisteredRecipientEmails,
   fetchServerAlertStatus,
+  getInitialAlertStatus,
   initAuth,
-  loadCloudAutoEmailSettings,
   markAttentionAlertsSent,
   sendAutomaticServerAttentionEmail,
   syncSentAttentionMapWithCurrentExtinguishers,
@@ -120,11 +120,9 @@ export default function App() {
   const [attentionEmailTargets, setAttentionEmailTargets] = useState<
     Extinguisher[]
   >([]);
-  const [serverAlertStatus, setServerAlertStatus] = useState<ServerAlertStatus>({
-    autoEmailConfigured: false,
-    provider: null,
-    senderEmail: null,
-  });
+  const [serverAlertStatus, setServerAlertStatus] = useState<ServerAlertStatus>(
+    () => getInitialAlertStatus()
+  );
   const isAutoSendingRef = useRef(false);
 
   const showToast = (msg: string) => {
@@ -265,13 +263,7 @@ export default function App() {
     setUser(safeUser);
     setCurrentTab('inicio');
     void establishServerSession(safeUser);
-    if (safeUser.role === 'Administrador') {
-      void loadCloudAutoEmailSettings().then(() => {
-        fetchServerAlertStatus().then(setServerAlertStatus);
-      });
-    } else {
-      fetchServerAlertStatus().then(setServerAlertStatus);
-    }
+    fetchServerAlertStatus().then(setServerAlertStatus);
     showToast(`Bem-vindo(a), ${safeUser.name}!`);
     logActivity('Sistema', 'login', `${safeUser.name} realizou login no sistema`, undefined, undefined, safeUser);
   };
@@ -354,7 +346,7 @@ export default function App() {
     async (targets: Extinguisher[], forceManualFallback = true) => {
       if (!user || user.role !== 'Administrador') return;
       if (!targets || targets.length === 0) return;
-      const recipients = extractRegisteredRecipientEmails(users);
+      const recipients = extractRegisteredRecipientEmails([...users, ...members]);
 
       if (serverAlertStatus.autoEmailConfigured && recipients.length > 0) {
         if (isAutoSendingRef.current) return;
@@ -393,7 +385,7 @@ export default function App() {
         setAttentionEmailTargets(targets);
       }
     },
-    [users, serverAlertStatus.autoEmailConfigured, user]
+    [users, members, serverAlertStatus.autoEmailConfigured, user]
   );
 
   // Keep sent-alert map aligned when extinguishers leave Atenção (never auto-send on login/mount)
@@ -684,7 +676,10 @@ export default function App() {
     }
   };
 
-  const registeredRecipientEmails = extractRegisteredRecipientEmails(users);
+  const registeredRecipientEmails = extractRegisteredRecipientEmails([
+    ...users,
+    ...members,
+  ]);
 
   const dynamicNotices = useMemo(
     () => buildDynamicNotices(extinguishers, inspections),
@@ -858,16 +853,11 @@ export default function App() {
           {currentTab === 'avisos' && (
             <NoticesView
               isAdmin={user.role === 'Administrador'}
-              adminEmail={user.email}
               notices={dynamicNotices}
               extinguishers={extinguishers}
               recipientEmails={registeredRecipientEmails}
               serverAlertStatus={serverAlertStatus}
               onNavigate={(tab) => setCurrentTab(tab)}
-              onRefreshAlertStatus={() => {
-                fetchServerAlertStatus().then(setServerAlertStatus);
-              }}
-              onShowToast={showToast}
               onOpenAttentionEmailModal={
                 user.role === 'Administrador'
                   ? (items) => void triggerAttentionAlert(items, true)
