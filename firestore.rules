@@ -14,6 +14,35 @@ service cloud.firestore {
       return request.resource.data;
     }
 
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'halloouii@gmail.com' ||
+        request.auth.token.email == 'nex6empresa@gmail.com'
+      );
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (
+        isSignedIn() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+
+    function isSenaiStaff() {
+      return isBootstrappedAdmin() || (
+        isSignedIn() &&
+        request.auth.token.email.matches('.*@senaisp\\.edu\\.br$')
+      );
+    }
+
     function isStrLen(val, minLen, maxLen) {
       return val is string && val.size() >= minLen && val.size() <= maxLen;
     }
@@ -24,6 +53,15 @@ service cloud.firestore {
 
     function isOptNum(data, field) {
       return !(field in data) || (data[field] is int || data[field] is float);
+    }
+
+    function isValidAdminGrant(data) {
+      return data.keys().hasAll(['uid', 'email', 'role'])
+        && data.keys().hasOnly(['uid', 'email', 'role', 'grantedAt'])
+        && isStrLen(data.uid, 1, 128)
+        && isStrLen(data.email, 3, 160)
+        && data.role == 'Administrador'
+        && isOptStrLen(data, 'grantedAt', 60);
     }
 
     function isValidExtinguisher(data) {
@@ -150,47 +188,73 @@ service cloud.firestore {
         && isOptStrLen(data, 'createdAt', 40);
     }
 
+    function isUserOwner(userData) {
+      return isSignedIn() && userData.email == request.auth.token.email;
+    }
+
+    match /admins/{adminUid} {
+      allow get: if isSignedIn() && isValidId(adminUid) && (request.auth.uid == adminUid || isBootstrappedAdmin());
+      allow list: if isBootstrappedAdmin();
+      allow create, update: if isBootstrappedAdmin() && isValidId(adminUid) && isValidAdminGrant(incoming()) && incoming().uid == adminUid;
+      allow delete: if isBootstrappedAdmin() && isValidId(adminUid);
+    }
+
     match /extinguishers/{extinguisherId} {
-      allow get: if isValidId(extinguisherId);
-      allow list: if true;
-      allow create, update: if isValidId(extinguisherId) && isValidExtinguisher(incoming());
-      allow delete: if isValidId(extinguisherId);
+      allow get: if isValidId(extinguisherId) && (isAdmin() || isSenaiStaff());
+      allow list: if isSenaiStaff() && existing().id is string;
+      allow create: if isAdmin() && isValidId(extinguisherId) && isValidExtinguisher(incoming());
+      allow update: if isAdmin() && isValidId(extinguisherId) && isValidExtinguisher(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin() && isValidId(extinguisherId);
     }
 
     match /brigade_members/{memberId} {
-      allow get: if isValidId(memberId);
-      allow list: if true;
-      allow create, update: if isValidId(memberId) && isValidBrigadeMember(incoming());
-      allow delete: if isValidId(memberId);
+      allow get: if isValidId(memberId) && (isAdmin() || isSenaiStaff());
+      allow list: if isSenaiStaff() && existing().id is string;
+      allow create: if isAdmin() && isValidId(memberId) && isValidBrigadeMember(incoming());
+      allow update: if isAdmin() && isValidId(memberId) && isValidBrigadeMember(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin() && isValidId(memberId);
     }
 
     match /inspections/{inspectionId} {
-      allow get: if isValidId(inspectionId);
-      allow list: if true;
-      allow create, update: if isValidId(inspectionId) && isValidInspection(incoming());
-      allow delete: if isValidId(inspectionId);
+      allow get: if isValidId(inspectionId) && (isAdmin() || isSenaiStaff());
+      allow list: if isSenaiStaff() && existing().id is string;
+      allow create: if isValidId(inspectionId) && isValidInspection(incoming()) && (isAdmin() || isSenaiStaff());
+      allow update: if isValidId(inspectionId) && isValidInspection(incoming()) && incoming().id == existing().id && (
+        isAdmin() ||
+        (isSenaiStaff() && incoming().diff(existing()).affectedKeys().hasOnly(['date', 'responsible', 'status', 'location', 'capacity', 'validityDate', 'nextInspectionDate', 'notes']))
+      );
+      allow delete: if isAdmin() && isValidId(inspectionId);
     }
 
     match /notices/{noticeId} {
-      allow get: if isValidId(noticeId);
-      allow list: if true;
-      allow create, update: if isValidId(noticeId) && isValidNotice(incoming());
-      allow delete: if isValidId(noticeId);
+      allow get: if isValidId(noticeId) && (isAdmin() || isSenaiStaff());
+      allow list: if isSenaiStaff() && existing().id is string;
+      allow create: if isAdmin() && isValidId(noticeId) && isValidNotice(incoming());
+      allow update: if isAdmin() && isValidId(noticeId) && isValidNotice(incoming()) && incoming().id == existing().id;
+      allow delete: if isAdmin() && isValidId(noticeId);
     }
 
-    // Immutable append-only audit trail
+    // Immutable append-only audit trail (PII isolated to admin or log author)
     match /activity_logs/{logId} {
-      allow get: if isValidId(logId);
-      allow list: if true;
-      allow create: if isValidId(logId) && isValidActivityLog(incoming());
+      allow get: if isValidId(logId) && (isAdmin() || (isSenaiStaff() && existing().userEmail == request.auth.token.email));
+      allow list: if isBootstrappedAdmin() || (isSenaiStaff() && existing().userEmail == request.auth.token.email);
+      allow create: if isValidId(logId) && isValidActivityLog(incoming()) && (
+        isAdmin() ||
+        (isSenaiStaff() && incoming().userEmail == request.auth.token.email)
+      );
       allow update, delete: if false;
     }
 
+    // PII Isolation: Only Admin or the Account Owner can read/update their user document
     match /users/{userId} {
-      allow get: if isValidId(userId);
-      allow list: if true;
-      allow create, update: if isValidId(userId) && isValidRegisteredUser(incoming());
-      allow delete: if isValidId(userId);
+      allow get: if isValidId(userId) && (isAdmin() || isUserOwner(existing()));
+      allow list: if isBootstrappedAdmin() || (isSignedIn() && existing().email == request.auth.token.email);
+      allow create: if isAdmin() && isValidId(userId) && isValidRegisteredUser(incoming());
+      allow update: if isValidId(userId) && isValidRegisteredUser(incoming()) && incoming().id == existing().id && (
+        isAdmin() ||
+        (isUserOwner(existing()) && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'phone', 'avatarUrl', 'responsibleSector', 'birthDate', 'password']))
+      );
+      allow delete: if isAdmin() && isValidId(userId);
     }
   }
 }

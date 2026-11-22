@@ -23,7 +23,8 @@ import {
 import { buildActivityEntry } from '../utils/activityUtils';
 import { computeStatusFromValidity } from '../utils/brigadaLogic';
 import { hashPassword, isPasswordHashed } from '../utils/security';
-import { db } from '../firebase';
+import { auth, db, handleFirestoreError, OperationType } from '../firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import {
   collection,
   doc,
@@ -31,6 +32,8 @@ import {
   deleteDoc,
   getDocs,
   onSnapshot,
+  query,
+  where,
   writeBatch,
   Unsubscribe,
 } from 'firebase/firestore';
@@ -95,11 +98,32 @@ function sanitizeDocId(id: string): string {
   return id.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 128);
 }
 
+const BOOTSTRAPPED_ADMIN_EMAILS = new Set([
+  'halloouii@gmail.com',
+  'nex6empresa@gmail.com',
+]);
+
+function isCloudSyncReady(): boolean {
+  return Boolean(
+    db &&
+      typeof window !== 'undefined' &&
+      auth?.currentUser &&
+      auth.currentUser.emailVerified
+  );
+}
+
+function isCurrentAuthBootstrappedAdmin(): boolean {
+  const email = (auth?.currentUser?.email || '').trim().toLowerCase();
+  return Boolean(
+    auth?.currentUser?.emailVerified && BOOTSTRAPPED_ADMIN_EMAILS.has(email)
+  );
+}
+
 async function replaceFirestoreCollection<T extends { id: string }>(
   collectionName: string,
   items: T[]
 ): Promise<void> {
-  if (!db || typeof window === 'undefined') return;
+  if (!isCloudSyncReady() || !db) return;
   try {
     const colRef = collection(db, collectionName);
     const existingSnap = await getDocs(colRef);
@@ -126,7 +150,7 @@ async function replaceFirestoreCollection<T extends { id: string }>(
       await setBatch.commit();
     }
   } catch (err) {
-    console.warn(`Erro ao sincronizar coleção ${collectionName} no Firestore:`, err);
+    handleFirestoreError(err, OperationType.WRITE, collectionName);
   }
 }
 
@@ -244,13 +268,14 @@ export const dbUsers = {
     notify(listeners.users, updated);
 
     // Sync to Firestore
-    if (db && typeof window !== 'undefined') {
+    if (isCloudSyncReady() && db) {
+      const docId = sanitizeDocId(newUser.id);
       try {
-        setDoc(doc(db, 'users', sanitizeDocId(newUser.id)), cleanForFirestore(newUser)).catch((err) =>
-          console.warn('Erro ao gravar usuário no Firestore:', err)
+        setDoc(doc(db, 'users', docId), cleanForFirestore(newUser)).catch((err) =>
+          handleFirestoreError(err, OperationType.CREATE, `users/${docId}`)
         );
       } catch (err) {
-        console.warn('Erro no setDoc de usuário:', err);
+        handleFirestoreError(err, OperationType.CREATE, `users/${docId}`);
       }
     }
 
@@ -265,15 +290,16 @@ export const dbUsers = {
     saveToStorage(KEYS.USERS, updated);
     notify(listeners.users, updated);
 
-    if (db && typeof window !== 'undefined') {
+    if (isCloudSyncReady() && db) {
+      const docId = sanitizeDocId(user.id);
       try {
         const payload = cleanForFirestore(user);
-        setDoc(doc(db, 'users', sanitizeDocId(user.id)), payload).catch((err) => {
-          console.warn('Erro ao atualizar usuário no Firestore:', err);
+        setDoc(doc(db, 'users', docId), payload).catch((err) => {
+          handleFirestoreError(err, OperationType.UPDATE, `users/${docId}`);
           onFirestoreError?.(err);
         });
       } catch (err) {
-        console.warn('Erro no update do usuário:', err);
+        handleFirestoreError(err, OperationType.UPDATE, `users/${docId}`);
         onFirestoreError?.(err);
       }
     }
@@ -293,13 +319,14 @@ export const dbUsers = {
     saveToStorage(KEYS.USERS, filtered);
     notify(listeners.users, filtered);
 
-    if (db && typeof window !== 'undefined') {
+    if (isCloudSyncReady() && db) {
+      const docId = sanitizeDocId(id);
       try {
-        deleteDoc(doc(db, 'users', sanitizeDocId(id))).catch((err) =>
-          console.warn('Erro ao excluir usuário no Firestore:', err)
+        deleteDoc(doc(db, 'users', docId)).catch((err) =>
+          handleFirestoreError(err, OperationType.DELETE, `users/${docId}`)
         );
       } catch (err) {
-        console.warn('Erro no delete do usuário:', err);
+        handleFirestoreError(err, OperationType.DELETE, `users/${docId}`);
       }
     }
 
@@ -359,7 +386,7 @@ export const dbUsers = {
     saveToStorage(KEYS.USERS, updated);
     notify(listeners.users, updated);
 
-    if (db && typeof window !== 'undefined') {
+    if (isCloudSyncReady() && db) {
       try {
         for (let i = 0; i < added.length; i += 400) {
           const batch = writeBatch(db);
@@ -370,11 +397,11 @@ export const dbUsers = {
             );
           });
           batch.commit().catch((err) =>
-            console.warn('Erro ao sincronizar brigadistas para usuários no Firestore:', err)
+            handleFirestoreError(err, OperationType.WRITE, 'users')
           );
         }
       } catch (err) {
-        console.warn('Erro no batch de sincronização de brigadistas:', err);
+        handleFirestoreError(err, OperationType.WRITE, 'users');
       }
     }
 
@@ -399,11 +426,16 @@ export const dbUsers = {
     saveToStorage(KEYS.USERS, updated);
     notify(listeners.users, updated);
 
-    if (db && typeof window !== 'undefined') {
+    if (isCloudSyncReady() && db) {
       try {
-        for (let i = 0; i < toUpgrade.length; i += 400) {
+        const authEmail = (auth.currentUser?.email || '').trim().toLowerCase();
+        const isBootAdmin = isCurrentAuthBootstrappedAdmin();
+        const cloudUpgrades = toUpgrade.filter(
+          (u) => isBootAdmin || u.email.trim().toLowerCase() === authEmail
+        );
+        for (let i = 0; i < cloudUpgrades.length; i += 400) {
           const batch = writeBatch(db);
-          toUpgrade.slice(i, i + 400).forEach((u) => {
+          cloudUpgrades.slice(i, i + 400).forEach((u) => {
             const hashed = upgradedMap.get(u.id);
             if (hashed) {
               batch.set(
@@ -413,11 +445,11 @@ export const dbUsers = {
             }
           });
           batch.commit().catch((err) =>
-            console.warn('Erro ao migrar hashes de senha no Firestore:', err)
+            handleFirestoreError(err, OperationType.WRITE, 'users')
           );
         }
       } catch (err) {
-        console.warn('Erro no batch de migração de senhas:', err);
+        handleFirestoreError(err, OperationType.WRITE, 'users');
       }
     }
 
@@ -473,13 +505,14 @@ export const dbExtinguishers = {
     saveToStorage(KEYS.EXTINGUISHERS, updated);
     notify(listeners.extinguishers, updated);
 
-    if (db && typeof window !== 'undefined') {
+    if (isCloudSyncReady() && db) {
+      const docId = sanitizeDocId(extWithQr.id);
       try {
-        setDoc(doc(db, 'extinguishers', sanitizeDocId(extWithQr.id)), cleanForFirestore(extWithQr)).catch((err) =>
-          console.warn('Erro ao criar extintor no Firestore:', err)
+        setDoc(doc(db, 'extinguishers', docId), cleanForFirestore(extWithQr)).catch((err) =>
+          handleFirestoreError(err, OperationType.CREATE, `extinguishers/${docId}`)
         );
       } catch (err) {
-        console.warn('Erro no setDoc de extintor:', err);
+        handleFirestoreError(err, OperationType.CREATE, `extinguishers/${docId}`);
       }
     }
 
@@ -496,13 +529,14 @@ export const dbExtinguishers = {
     saveToStorage(KEYS.EXTINGUISHERS, updated);
     notify(listeners.extinguishers, updated);
 
-    if (db && typeof window !== 'undefined') {
+    if (isCloudSyncReady() && db) {
+      const docId = sanitizeDocId(ext.id);
       try {
-        setDoc(doc(db, 'extinguishers', sanitizeDocId(ext.id)), cleanForFirestore(ext)).catch((err) =>
-          console.warn('Erro ao atualizar extintor no Firestore:', err)
+        setDoc(doc(db, 'extinguishers', docId), cleanForFirestore(ext)).catch((err) =>
+          handleFirestoreError(err, OperationType.UPDATE, `extinguishers/${docId}`)
         );
       } catch (err) {
-        console.warn('Erro no update de extintor:', err);
+        handleFirestoreError(err, OperationType.UPDATE, `extinguishers/${docId}`);
       }
     }
   },
@@ -512,13 +546,14 @@ export const dbExtinguishers = {
     saveToStorage(KEYS.EXTINGUISHERS, filtered);
     notify(listeners.extinguishers, filtered);
 
-    if (db && typeof window !== 'undefined') {
+    if (isCloudSyncReady() && db) {
+      const docId = sanitizeDocId(id);
       try {
-        deleteDoc(doc(db, 'extinguishers', sanitizeDocId(id))).catch((err) =>
-          console.warn('Erro ao excluir extintor no Firestore:', err)
+        deleteDoc(doc(db, 'extinguishers', docId)).catch((err) =>
+          handleFirestoreError(err, OperationType.DELETE, `extinguishers/${docId}`)
         );
       } catch (err) {
-        console.warn('Erro no delete de extintor:', err);
+        handleFirestoreError(err, OperationType.DELETE, `extinguishers/${docId}`);
       }
     }
   },
@@ -554,13 +589,14 @@ export const dbInspections = {
     saveToStorage(KEYS.INSPECTIONS, updated);
     notify(listeners.inspections, updated);
 
-    if (db && typeof window !== 'undefined') {
+    if (isCloudSyncReady() && db) {
+      const docId = sanitizeDocId(insp.id);
       try {
-        setDoc(doc(db, 'inspections', sanitizeDocId(insp.id)), cleanForFirestore(insp)).catch((err) =>
-          console.warn('Erro ao criar inspeção no Firestore:', err)
+        setDoc(doc(db, 'inspections', docId), cleanForFirestore(insp)).catch((err) =>
+          handleFirestoreError(err, OperationType.CREATE, `inspections/${docId}`)
         );
       } catch (err) {
-        console.warn('Erro no create de inspeção:', err);
+        handleFirestoreError(err, OperationType.CREATE, `inspections/${docId}`);
       }
     }
 
@@ -572,13 +608,14 @@ export const dbInspections = {
     saveToStorage(KEYS.INSPECTIONS, updated);
     notify(listeners.inspections, updated);
 
-    if (db && typeof window !== 'undefined') {
+    if (isCloudSyncReady() && db) {
+      const docId = sanitizeDocId(insp.id);
       try {
-        setDoc(doc(db, 'inspections', sanitizeDocId(insp.id)), cleanForFirestore(insp)).catch((err) =>
-          console.warn('Erro ao atualizar inspeção no Firestore:', err)
+        setDoc(doc(db, 'inspections', docId), cleanForFirestore(insp)).catch((err) =>
+          handleFirestoreError(err, OperationType.UPDATE, `inspections/${docId}`)
         );
       } catch (err) {
-        console.warn('Erro no update de inspeção:', err);
+        handleFirestoreError(err, OperationType.UPDATE, `inspections/${docId}`);
       }
     }
   },
@@ -590,10 +627,11 @@ export const dbInspections = {
     saveToStorage(KEYS.INSPECTIONS, filtered);
     notify(listeners.inspections, filtered);
 
-    if (db && typeof window !== 'undefined') {
+    if (isCloudSyncReady() && db) {
       removed.forEach((insp) => {
-        deleteDoc(doc(db!, 'inspections', sanitizeDocId(insp.id))).catch((err) =>
-          console.warn('Erro ao excluir inspeção associada no Firestore:', err)
+        const docId = sanitizeDocId(insp.id);
+        deleteDoc(doc(db!, 'inspections', docId)).catch((err) =>
+          handleFirestoreError(err, OperationType.DELETE, `inspections/${docId}`)
         );
       });
     }
@@ -625,13 +663,14 @@ export const dbBrigade = {
     saveToStorage(KEYS.MEMBERS, updated);
     notify(listeners.members, updated);
 
-    if (db && typeof window !== 'undefined') {
+    if (isCloudSyncReady() && db) {
+      const docId = sanitizeDocId(member.id);
       try {
-        setDoc(doc(db, 'brigade_members', sanitizeDocId(member.id)), cleanForFirestore(member)).catch((err) =>
-          console.warn('Erro ao criar brigadista no Firestore:', err)
+        setDoc(doc(db, 'brigade_members', docId), cleanForFirestore(member)).catch((err) =>
+          handleFirestoreError(err, OperationType.CREATE, `brigade_members/${docId}`)
         );
       } catch (err) {
-        console.warn('Erro no setDoc de brigadista:', err);
+        handleFirestoreError(err, OperationType.CREATE, `brigade_members/${docId}`);
       }
     }
 
@@ -643,13 +682,14 @@ export const dbBrigade = {
     saveToStorage(KEYS.MEMBERS, updated);
     notify(listeners.members, updated);
 
-    if (db && typeof window !== 'undefined') {
+    if (isCloudSyncReady() && db) {
+      const docId = sanitizeDocId(member.id);
       try {
-        setDoc(doc(db, 'brigade_members', sanitizeDocId(member.id)), cleanForFirestore(member)).catch((err) =>
-          console.warn('Erro ao atualizar brigadista no Firestore:', err)
+        setDoc(doc(db, 'brigade_members', docId), cleanForFirestore(member)).catch((err) =>
+          handleFirestoreError(err, OperationType.UPDATE, `brigade_members/${docId}`)
         );
       } catch (err) {
-        console.warn('Erro no update de brigadista:', err);
+        handleFirestoreError(err, OperationType.UPDATE, `brigade_members/${docId}`);
       }
     }
   },
@@ -659,13 +699,14 @@ export const dbBrigade = {
     saveToStorage(KEYS.MEMBERS, filtered);
     notify(listeners.members, filtered);
 
-    if (db && typeof window !== 'undefined') {
+    if (isCloudSyncReady() && db) {
+      const docId = sanitizeDocId(id);
       try {
-        deleteDoc(doc(db, 'brigade_members', sanitizeDocId(id))).catch((err) =>
-          console.warn('Erro ao excluir brigadista no Firestore:', err)
+        deleteDoc(doc(db, 'brigade_members', docId)).catch((err) =>
+          handleFirestoreError(err, OperationType.DELETE, `brigade_members/${docId}`)
         );
       } catch (err) {
-        console.warn('Erro no delete de brigadista:', err);
+        handleFirestoreError(err, OperationType.DELETE, `brigade_members/${docId}`);
       }
     }
   },
@@ -737,13 +778,14 @@ export const dbActivityLogs = {
     saveToStorage(KEYS.ACTIVITY_LOGS, updated);
     notify(listeners.activityLogs, updated);
 
-    if (db && typeof window !== 'undefined') {
+    if (isCloudSyncReady() && db) {
+      const docId = sanitizeDocId(newEntry.id);
       try {
-        setDoc(doc(db, 'activity_logs', sanitizeDocId(newEntry.id)), cleanForFirestore(newEntry)).catch((err) =>
-          console.warn('Erro ao gravar log no Firestore:', err)
+        setDoc(doc(db, 'activity_logs', docId), cleanForFirestore(newEntry)).catch((err) =>
+          handleFirestoreError(err, OperationType.CREATE, `activity_logs/${docId}`)
         );
       } catch (err) {
-        console.warn('Erro no setDoc de log:', err);
+        handleFirestoreError(err, OperationType.CREATE, `activity_logs/${docId}`);
       }
     }
 
@@ -863,189 +905,223 @@ export function initFirestoreRealtimeSync(): () => void {
   }
   hasInitializedFirestore = true;
 
-  const unsubscribes: Unsubscribe[] = [];
+  let unsubscribes: Unsubscribe[] = [];
 
-  try {
-    // 1. Sync Extinguishers
-    const extCol = collection(db, 'extinguishers');
-    const unsubExt = onSnapshot(
-      extCol,
-      (snapshot) => {
-        if (snapshot.empty) {
-          console.info('Firestore vazio: populando 123 extintores oficiais do SENAI...');
-          dbExtinguishers.saveAll(INITIAL_EXTINGUISHERS);
-        } else {
-          const remoteList: Extinguisher[] = [];
-          const toFix: Extinguisher[] = [];
-          snapshot.forEach((d) => {
-            const res = normalizeExtinguisherRecord(d.data() as Extinguisher);
-            remoteList.push(res.item);
-            if (res.changed) toFix.push(res.item);
-          });
-          if (toFix.length > 0 && db) {
-            for (let i = 0; i < toFix.length; i += 400) {
-              const batch = writeBatch(db);
-              toFix.slice(i, i + 400).forEach((ext) => {
-                batch.set(doc(db!, 'extinguishers', sanitizeDocId(ext.id)), cleanForFirestore(ext));
-              });
-              batch.commit().catch((err) => console.warn('Erro ao normalizar extintores no Firestore:', err));
-            }
-          }
-          saveToStorage(KEYS.EXTINGUISHERS, remoteList);
-          notify(listeners.extinguishers, remoteList);
-        }
-      },
-      (err) => console.warn('Aviso no listener do Firestore (extinguishers):', err)
-    );
-    unsubscribes.push(unsubExt);
-
-    let membersReady = false;
-    let usersReady = false;
-    let latestMembers: BrigadeMember[] = [];
-
-    const runOneTimeBrigadeUsersBackfill = () => {
-      if (!membersReady || !usersReady) return;
-      if (hasDoneBrigadeUsersBackfill()) return;
-      dbUsers.syncFromBrigadeMembers(latestMembers);
-      markBrigadeUsersBackfillDone();
-    };
-
-    // 2. Sync Brigade Members
-    const membersCol = collection(db, 'brigade_members');
-    const unsubMembers = onSnapshot(
-      membersCol,
-      (snapshot) => {
-        if (snapshot.empty) {
-          console.info('Firestore vazio: populando 12 membros oficiais da brigada...');
-          latestMembers = INITIAL_BRIGADE_MEMBERS;
-          dbBrigade.saveAll(INITIAL_BRIGADE_MEMBERS);
-        } else {
-          const remoteList: BrigadeMember[] = [];
-          snapshot.forEach((d) => remoteList.push(d.data() as BrigadeMember));
-          latestMembers = remoteList;
-          saveToStorage(KEYS.MEMBERS, remoteList);
-          notify(listeners.members, remoteList);
-        }
-        membersReady = true;
-        runOneTimeBrigadeUsersBackfill();
-      },
-      (err) => console.warn('Aviso no listener do Firestore (brigade_members):', err)
-    );
-    unsubscribes.push(unsubMembers);
-
-    // 3. Sync Users
-    const usersCol = collection(db, 'users');
-    const unsubUsers = onSnapshot(
-      usersCol,
-      (snapshot) => {
-        if (snapshot.empty) {
-          console.info('Firestore vazio: populando usuários oficiais e membros da brigada...');
-          dbUsers.saveAll(INITIAL_USERS);
-          markBrigadeUsersBackfillDone();
-        } else {
-          const remoteList: RegisteredUser[] = [];
-          snapshot.forEach((d) => {
-            const data = d.data() as RegisteredUser;
-            remoteList.push({ ...data, id: data.id || d.id });
-          });
-          saveToStorage(KEYS.USERS, remoteList);
-          notify(listeners.users, remoteList);
-          if (remoteList.some((u) => !isPasswordHashed(u.password))) {
-            void dbUsers.migrateLegacyPasswords();
-          }
-        }
-        usersReady = true;
-        runOneTimeBrigadeUsersBackfill();
-      },
-      (err) => console.warn('Aviso no listener do Firestore (users):', err)
-    );
-    unsubscribes.push(unsubUsers);
-
-    // 4. Sync Inspections
-    const inspCol = collection(db, 'inspections');
-    const unsubInsp = onSnapshot(
-      inspCol,
-      (snapshot) => {
-        if (snapshot.empty) {
-          dbInspections.saveAll(INITIAL_INSPECTIONS);
-        } else {
-          const remoteList: Inspection[] = [];
-          const toFix: Inspection[] = [];
-          snapshot.forEach((d) => {
-            const res = normalizeInspectionRecord(d.data() as Inspection);
-            remoteList.push(res.item);
-            if (res.changed) toFix.push(res.item);
-          });
-          if (toFix.length > 0 && db) {
-            for (let i = 0; i < toFix.length; i += 400) {
-              const batch = writeBatch(db);
-              toFix.slice(i, i + 400).forEach((insp) => {
-                batch.set(doc(db!, 'inspections', sanitizeDocId(insp.id)), cleanForFirestore(insp));
-              });
-              batch.commit().catch((err) => console.warn('Erro ao normalizar inspeções no Firestore:', err));
-            }
-          }
-          saveToStorage(KEYS.INSPECTIONS, remoteList);
-          notify(listeners.inspections, remoteList);
-        }
-      },
-      (err) => console.warn('Aviso no listener do Firestore (inspections):', err)
-    );
-    unsubscribes.push(unsubInsp);
-
-    // 5. Sync Notices
-    const noticesCol = collection(db, 'notices');
-    const unsubNotices = onSnapshot(
-      noticesCol,
-      (snapshot) => {
-        if (snapshot.empty) {
-          dbNotices.saveAll(INITIAL_NOTICES);
-        } else {
-          const remoteList: Notice[] = [];
-          snapshot.forEach((d) => remoteList.push(d.data() as Notice));
-          saveToStorage(KEYS.NOTICES, remoteList);
-          notify(listeners.notices, remoteList);
-        }
-      },
-      (err) => console.warn('Aviso no listener do Firestore (notices):', err)
-    );
-    unsubscribes.push(unsubNotices);
-
-    // 6. Sync Activity Logs
-    const logsCol = collection(db, 'activity_logs');
-    const unsubLogs = onSnapshot(
-      logsCol,
-      (snapshot) => {
-        if (snapshot.empty) {
-          saveToStorage(KEYS.ACTIVITY_LOGS, []);
-          notify(listeners.activityLogs, []);
-        } else {
-          if (typeof localStorage !== 'undefined') {
-            localStorage.removeItem(KEYS.ACTIVITY_CLEARED);
-          }
-          const remoteList: ActivityLogEntry[] = [];
-          snapshot.forEach((d) => remoteList.push(d.data() as ActivityLogEntry));
-          // Sort newest first
-          remoteList.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
-          saveToStorage(KEYS.ACTIVITY_LOGS, remoteList);
-          notify(listeners.activityLogs, remoteList);
-        }
-      },
-      (err) => console.warn('Aviso no listener do Firestore (activity_logs):', err)
-    );
-    unsubscribes.push(unsubLogs);
-  } catch (err) {
-    console.warn('Não foi possível iniciar sincronização remota do Firestore:', err);
-  }
-
-  return () => {
+  const detachCollectionListeners = () => {
     unsubscribes.forEach((unsub) => {
       try {
         unsub();
-      } catch (e) {
+      } catch {
         // ignore
       }
     });
+    unsubscribes = [];
+  };
+
+  const attachCollectionListeners = (authEmail: string, isBootAdmin: boolean) => {
+    detachCollectionListeners();
+    if (!db) return;
+
+    try {
+      // 1. Sync Extinguishers
+      const extCol = collection(db, 'extinguishers');
+      const unsubExt = onSnapshot(
+        extCol,
+        (snapshot) => {
+          if (snapshot.empty && isBootAdmin) {
+            dbExtinguishers.saveAll(INITIAL_EXTINGUISHERS);
+          } else if (!snapshot.empty) {
+            const remoteList: Extinguisher[] = [];
+            const toFix: Extinguisher[] = [];
+            snapshot.forEach((d) => {
+              const res = normalizeExtinguisherRecord(d.data() as Extinguisher);
+              remoteList.push(res.item);
+              if (res.changed) toFix.push(res.item);
+            });
+            if (toFix.length > 0 && db && isBootAdmin) {
+              for (let i = 0; i < toFix.length; i += 400) {
+                const batch = writeBatch(db);
+                toFix.slice(i, i + 400).forEach((ext) => {
+                  batch.set(
+                    doc(db!, 'extinguishers', sanitizeDocId(ext.id)),
+                    cleanForFirestore(ext)
+                  );
+                });
+                batch.commit().catch((err) =>
+                  handleFirestoreError(err, OperationType.WRITE, 'extinguishers')
+                );
+              }
+            }
+            saveToStorage(KEYS.EXTINGUISHERS, remoteList);
+            notify(listeners.extinguishers, remoteList);
+          }
+        },
+        (err) => handleFirestoreError(err, OperationType.LIST, 'extinguishers')
+      );
+      unsubscribes.push(unsubExt);
+
+      let membersReady = false;
+      let usersReady = false;
+      let latestMembers: BrigadeMember[] = [];
+
+      const runOneTimeBrigadeUsersBackfill = () => {
+        if (!isBootAdmin || !membersReady || !usersReady) return;
+        if (hasDoneBrigadeUsersBackfill()) return;
+        dbUsers.syncFromBrigadeMembers(latestMembers);
+        markBrigadeUsersBackfillDone();
+      };
+
+      // 2. Sync Brigade Members
+      const membersCol = collection(db, 'brigade_members');
+      const unsubMembers = onSnapshot(
+        membersCol,
+        (snapshot) => {
+          if (snapshot.empty && isBootAdmin) {
+            latestMembers = INITIAL_BRIGADE_MEMBERS;
+            dbBrigade.saveAll(INITIAL_BRIGADE_MEMBERS);
+          } else if (!snapshot.empty) {
+            const remoteList: BrigadeMember[] = [];
+            snapshot.forEach((d) => remoteList.push(d.data() as BrigadeMember));
+            latestMembers = remoteList;
+            saveToStorage(KEYS.MEMBERS, remoteList);
+            notify(listeners.members, remoteList);
+          }
+          membersReady = true;
+          runOneTimeBrigadeUsersBackfill();
+        },
+        (err) => handleFirestoreError(err, OperationType.LIST, 'brigade_members')
+      );
+      unsubscribes.push(unsubMembers);
+
+      // 3. Sync Users (Admin lists all; non-admin queries only own record per PII isolation rule)
+      const usersQuery = isBootAdmin
+        ? collection(db, 'users')
+        : query(collection(db, 'users'), where('email', '==', authEmail));
+      const unsubUsers = onSnapshot(
+        usersQuery,
+        (snapshot) => {
+          if (snapshot.empty && isBootAdmin) {
+            dbUsers.saveAll(INITIAL_USERS);
+            markBrigadeUsersBackfillDone();
+          } else if (!snapshot.empty) {
+            const remoteList: RegisteredUser[] = [];
+            snapshot.forEach((d) => {
+              const data = d.data() as RegisteredUser;
+              remoteList.push({ ...data, id: data.id || d.id });
+            });
+            saveToStorage(KEYS.USERS, remoteList);
+            notify(listeners.users, remoteList);
+            if (remoteList.some((u) => !isPasswordHashed(u.password))) {
+              void dbUsers.migrateLegacyPasswords();
+            }
+          }
+          usersReady = true;
+          runOneTimeBrigadeUsersBackfill();
+        },
+        (err) => handleFirestoreError(err, OperationType.LIST, 'users')
+      );
+      unsubscribes.push(unsubUsers);
+
+      // 4. Sync Inspections
+      const inspCol = collection(db, 'inspections');
+      const unsubInsp = onSnapshot(
+        inspCol,
+        (snapshot) => {
+          if (snapshot.empty && isBootAdmin) {
+            dbInspections.saveAll(INITIAL_INSPECTIONS);
+          } else if (!snapshot.empty) {
+            const remoteList: Inspection[] = [];
+            const toFix: Inspection[] = [];
+            snapshot.forEach((d) => {
+              const res = normalizeInspectionRecord(d.data() as Inspection);
+              remoteList.push(res.item);
+              if (res.changed) toFix.push(res.item);
+            });
+            if (toFix.length > 0 && db && isBootAdmin) {
+              for (let i = 0; i < toFix.length; i += 400) {
+                const batch = writeBatch(db);
+                toFix.slice(i, i + 400).forEach((insp) => {
+                  batch.set(
+                    doc(db!, 'inspections', sanitizeDocId(insp.id)),
+                    cleanForFirestore(insp)
+                  );
+                });
+                batch.commit().catch((err) =>
+                  handleFirestoreError(err, OperationType.WRITE, 'inspections')
+                );
+              }
+            }
+            saveToStorage(KEYS.INSPECTIONS, remoteList);
+            notify(listeners.inspections, remoteList);
+          }
+        },
+        (err) => handleFirestoreError(err, OperationType.LIST, 'inspections')
+      );
+      unsubscribes.push(unsubInsp);
+
+      // 5. Sync Notices
+      const noticesCol = collection(db, 'notices');
+      const unsubNotices = onSnapshot(
+        noticesCol,
+        (snapshot) => {
+          if (snapshot.empty && isBootAdmin) {
+            dbNotices.saveAll(INITIAL_NOTICES);
+          } else if (!snapshot.empty) {
+            const remoteList: Notice[] = [];
+            snapshot.forEach((d) => remoteList.push(d.data() as Notice));
+            saveToStorage(KEYS.NOTICES, remoteList);
+            notify(listeners.notices, remoteList);
+          }
+        },
+        (err) => handleFirestoreError(err, OperationType.LIST, 'notices')
+      );
+      unsubscribes.push(unsubNotices);
+
+      // 6. Sync Activity Logs (Admin lists all; non-admin queries only own logs per PII isolation rule)
+      const logsQuery = isBootAdmin
+        ? collection(db, 'activity_logs')
+        : query(collection(db, 'activity_logs'), where('userEmail', '==', authEmail));
+      const unsubLogs = onSnapshot(
+        logsQuery,
+        (snapshot) => {
+          if (snapshot.empty) {
+            saveToStorage(KEYS.ACTIVITY_LOGS, []);
+            notify(listeners.activityLogs, []);
+          } else {
+            if (typeof localStorage !== 'undefined') {
+              localStorage.removeItem(KEYS.ACTIVITY_CLEARED);
+            }
+            const remoteList: ActivityLogEntry[] = [];
+            snapshot.forEach((d) => remoteList.push(d.data() as ActivityLogEntry));
+            remoteList.sort((a, b) =>
+              (b.timestamp || '').localeCompare(a.timestamp || '')
+            );
+            saveToStorage(KEYS.ACTIVITY_LOGS, remoteList);
+            notify(listeners.activityLogs, remoteList);
+          }
+        },
+        (err) => handleFirestoreError(err, OperationType.LIST, 'activity_logs')
+      );
+      unsubscribes.push(unsubLogs);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.LIST, 'firestore_sync');
+    }
+  };
+
+  const unsubAuth = onAuthStateChanged(auth, (firebaseUser) => {
+    if (firebaseUser && firebaseUser.emailVerified && firebaseUser.email) {
+      attachCollectionListeners(
+        firebaseUser.email,
+        isCurrentAuthBootstrappedAdmin()
+      );
+    } else {
+      detachCollectionListeners();
+    }
+  });
+
+  return () => {
+    unsubAuth();
+    detachCollectionListeners();
     hasInitializedFirestore = false;
   };
 }

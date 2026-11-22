@@ -118,9 +118,25 @@
         "createdAt": { "type": "string", "maxLength": 40 }
       },
       "required": ["id", "name", "role", "email"]
+    },
+    "AdminRole": {
+      "title": "AdminRole",
+      "description": "Registro de permissão administrativa vinculada ao UID do Firebase Auth",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128 },
+        "email": { "type": "string", "maxLength": 160 },
+        "role": { "type": "string", "enum": ["Administrador"] },
+        "grantedAt": { "type": "string", "maxLength": 60 }
+      },
+      "required": ["uid", "email", "role"]
     }
   },
   "firestore": {
+    "/admins/{adminUid}": {
+      "schema": "AdminRole",
+      "description": "Coleção de controle de administradores autenticados no Firebase Auth"
+    },
     "/extinguishers/{extinguisherId}": {
       "schema": "Extinguisher",
       "description": "Coleção de extintores de combate a incêndio do SENAI"

@@ -141,6 +141,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             </p>
 
             <div className="space-y-4 max-w-xs mx-auto">
+              {errorMessage && (
+                <div className="p-3 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg text-left">
+                  {errorMessage}
+                </div>
+              )}
+
               <button
                 onClick={() => handleSelectRole('Administrador')}
                 className="w-full py-3.5 px-6 bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white font-bold rounded-lg shadow-sm transition-all text-sm tracking-wide cursor-pointer"
@@ -234,9 +240,10 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               {/* Submit Button */}
               <button
                 type="submit"
-                className="w-full py-3 px-6 bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white font-bold rounded-lg shadow-sm transition-all text-sm tracking-wide mt-2 cursor-pointer"
+                disabled={isVerifying}
+                className="w-full py-3 px-6 bg-red-600 hover:bg-red-700 active:scale-[0.99] text-white font-bold rounded-lg shadow-sm transition-all text-sm tracking-wide mt-2 cursor-pointer disabled:opacity-60"
               >
-                Entrar
+                {isVerifying ? 'Verificando...' : 'Entrar'}
               </button>
             </form>
           </div>

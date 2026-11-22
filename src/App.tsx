@@ -53,6 +53,7 @@ import {
   syncSentAttentionMapWithCurrentExtinguishers,
 } from './services/gmailAlert';
 import { sanitizeUserForSession } from './utils/security';
+import { auth, signOutFirebaseAuth } from './firebase';
 
 export default function App() {
   // Support ?autostart=1 query param from Ultra Mode
@@ -166,6 +167,7 @@ export default function App() {
         setUser(null);
         localStorage.removeItem('senai_brigada_user');
         clearServerSession();
+        void signOutFirebaseAuth();
         setCurrentTab('inicio');
         showToast('Sessão encerrada por inatividade para sua segurança.');
       }, INACTIVITY_TIMEOUT_MS);
@@ -203,7 +205,11 @@ export default function App() {
           localStorage.setItem('senai_brigada_user', JSON.stringify(merged));
           return merged;
         }
-        if (data.length > 0) {
+        const isActiveFirebaseGoogleUser = Boolean(
+          auth?.currentUser?.emailVerified &&
+            auth.currentUser.email?.toLowerCase() === current.email.toLowerCase()
+        );
+        if (data.length > 0 && !isActiveFirebaseGoogleUser) {
           localStorage.removeItem('senai_brigada_user');
           return null;
         }
@@ -267,6 +273,7 @@ export default function App() {
     setUser(null);
     localStorage.removeItem('senai_brigada_user');
     clearServerSession();
+    void signOutFirebaseAuth();
     setCurrentTab('inicio');
     showToast('Sessão encerrada com sucesso.');
   };
