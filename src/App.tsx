@@ -282,50 +282,70 @@ export default function App() {
   const handleAddUser = (
     newUser: Omit<RegisteredUser, 'id'>
   ): RegisteredUser => {
+    if (!user || user.role !== 'Administrador') {
+      showToast('Apenas administradores podem cadastrar usuários.');
+      throw new Error('Permissão negada.');
+    }
     const created = dbUsers.create(newUser);
     setUsers(dbUsers.getAll());
     showToast(`E-mail ${created.email} cadastrado com sucesso!`);
-    if (user) {
-      logActivity('Usuários', 'create', `${user.name} cadastrou novo e-mail (${created.email}) no banco`);
-    }
+    logActivity('Usuários', 'create', `${user.name} cadastrou novo e-mail (${created.email}) no banco`);
     return created;
   };
 
   const handleUpdateUser = (updatedUser: RegisteredUser) => {
+    if (!user) return;
+    if (user.role !== 'Administrador' && updatedUser.id !== user.id) {
+      showToast('Você só tem permissão para editar seus próprios dados.');
+      return;
+    }
+
     const existingDbUser =
       dbUsers.getAll().find((u) => u.id === updatedUser.id) ||
       users.find((u) => u.id === updatedUser.id);
+
+    const safeRole =
+      user.role === 'Administrador'
+        ? updatedUser.role
+        : user.role;
+
     const userToSave: RegisteredUser = {
       ...updatedUser,
+      role: safeRole,
       password: updatedUser.password || existingDbUser?.password,
     };
     dbUsers.update(userToSave, () => {
       showToast('Salvo localmente, mas houve falha ao sincronizar com a nuvem.');
     });
     setUsers(dbUsers.getAll());
-    if (user && user.id === updatedUser.id) {
+    if (user.id === updatedUser.id) {
       const merged = sanitizeUserForSession({ ...user, ...userToSave });
       setUser(merged);
       localStorage.setItem('senai_brigada_user', JSON.stringify(merged));
     }
-    showToast(`Usuário ${updatedUser.name} atualizado no banco.`);
-    if (user) {
-      logActivity('Usuários', 'update', `${user.name} atualizou as informações de ${updatedUser.name}`);
-    }
+    showToast(
+      user.id === updatedUser.id
+        ? 'Seus dados foram atualizados com sucesso!'
+        : `Usuário ${updatedUser.name} atualizado no banco.`
+    );
+    logActivity('Usuários', 'update', `${user.name} atualizou as informações de ${updatedUser.name}`);
   };
 
   const handleDeleteUser = (id: string) => {
+    if (!user || user.role !== 'Administrador') {
+      showToast('Apenas administradores podem excluir usuários.');
+      return;
+    }
     const target = users.find((u) => u.id === id);
     dbUsers.delete(id);
     setUsers(dbUsers.getAll());
     showToast('Usuário removido do banco.');
-    if (user) {
-      logActivity('Usuários', 'delete', `${user.name} removeu o usuário ${target ? target.name : id} do banco`);
-    }
+    logActivity('Usuários', 'delete', `${user.name} removeu o usuário ${target ? target.name : id} do banco`);
   };
 
   const triggerAttentionAlert = useCallback(
     async (targets: Extinguisher[], forceManualFallback = true) => {
+      if (!user || user.role !== 'Administrador') return;
       if (!targets || targets.length === 0) return;
       const recipients = extractRegisteredRecipientEmails(users);
 
@@ -376,6 +396,10 @@ export default function App() {
 
   // --- Extinguisher Database Handlers ---
   const handleAddExtinguisher = (newExt: Extinguisher) => {
+    if (!user || user.role !== 'Administrador') {
+      showToast('Apenas administradores podem cadastrar extintores.');
+      return;
+    }
     dbExtinguishers.create(newExt);
     setExtinguishers(dbExtinguishers.getAll());
 
@@ -390,7 +414,7 @@ export default function App() {
         extinguisherCode: newExt.code,
         extinguisherType: newExt.type,
         date: newExt.purchaseDate || new Date().toLocaleDateString('pt-BR'),
-        responsible: user?.name || 'Brigada SENAI',
+        responsible: user.name || 'Brigada SENAI',
         status: newExt.status,
         floor: newExt.floor,
         location: newExt.location,
@@ -404,21 +428,23 @@ export default function App() {
     }
 
     showToast(`Extintor ${newExt.code} cadastrado no banco de dados!`);
-    if (user) {
-      logActivity(
-        'Extintores',
-        'create',
-        `${user.name} adicionou 1 extintor (código ${newExt.code} - ${newExt.floor} ${newExt.location})`,
-        newExt.code,
-        newExt.floor
-      );
-    }
+    logActivity(
+      'Extintores',
+      'create',
+      `${user.name} adicionou 1 extintor (código ${newExt.code} - ${newExt.floor} ${newExt.location})`,
+      newExt.code,
+      newExt.floor
+    );
     if (newExt.status === 'Atenção') {
       void triggerAttentionAlert([newExt], true);
     }
   };
 
   const handleUpdateExtinguisher = (updated: Extinguisher) => {
+    if (!user || user.role !== 'Administrador') {
+      showToast('Apenas administradores podem editar extintores.');
+      return;
+    }
     const previousExt = extinguishers.find((e) => e.id === updated.id);
     dbExtinguishers.update(updated);
     setExtinguishers(dbExtinguishers.getAll());
@@ -443,21 +469,26 @@ export default function App() {
     }
 
     showToast(`Extintor ${updated.code} atualizado no banco!`);
-    if (user) {
-      logActivity(
-        'Extintores',
-        'update',
-        `${user.name} atualizou os dados do extintor ${updated.code} (${updated.floor})`,
-        updated.code,
-        updated.floor
-      );
-    }
-    if (updated.status === 'Atenção' && previousExt?.status !== 'Atenção') {
+    logActivity(
+      'Extintores',
+      'update',
+      `${user.name} atualizou os dados do extintor ${updated.code} (${updated.floor})`,
+      updated.code,
+      updated.floor
+    );
+    if (
+      updated.status === 'Atenção' &&
+      previousExt?.status !== 'Atenção'
+    ) {
       void triggerAttentionAlert([updated], true);
     }
   };
 
   const handleDeleteExtinguisher = (id: string) => {
+    if (!user || user.role !== 'Administrador') {
+      showToast('Apenas administradores podem excluir extintores.');
+      return;
+    }
     const target = extinguishers.find((e) => e.id === id);
     dbExtinguishers.delete(id);
     setExtinguishers(dbExtinguishers.getAll());
@@ -466,19 +497,21 @@ export default function App() {
       setInspections(dbInspections.getAll());
     }
     showToast(`Extintor ${target ? target.code : ''} excluído do banco.`);
-    if (user) {
-      logActivity(
-        'Extintores',
-        'delete',
-        `${user.name} excluiu o extintor ${target ? target.code : id} (${target?.floor || ''})`,
-        target?.code,
-        target?.floor
-      );
-    }
+    logActivity(
+      'Extintores',
+      'delete',
+      `${user.name} excluiu o extintor ${target ? target.code : id} (${target?.floor || ''})`,
+      target?.code,
+      target?.floor
+    );
   };
 
   // --- Inspection Database Handlers ---
   const handleUpdateInspection = (updated: Inspection) => {
+    if (!user || user.role !== 'Administrador') {
+      showToast('Apenas administradores podem editar inspeções.');
+      return;
+    }
     const matchingExt = dbExtinguishers
       .getAll()
       .find((e) => e.code === updated.extinguisherCode);
@@ -513,7 +546,11 @@ export default function App() {
         updated.floor
       );
     }
-    if (updated.status === 'Atenção' && previousStatus !== 'Atenção') {
+    if (
+      updated.status === 'Atenção' &&
+      previousStatus !== 'Atenção' &&
+      user?.role === 'Administrador'
+    ) {
       const targetForEmail: Extinguisher = syncedExt || {
         id: updated.id,
         code: updated.extinguisherCode,
@@ -531,6 +568,10 @@ export default function App() {
 
   // --- Brigade Member Database Handlers ---
   const handleAddMember = (newMember: BrigadeMember) => {
+    if (!user || user.role !== 'Administrador') {
+      showToast('Apenas administradores podem adicionar membros.');
+      return;
+    }
     dbBrigade.create(newMember);
     setMembers(dbBrigade.getAll());
     const syncedUsers = dbUsers.syncFromBrigadeMembers([newMember]);
@@ -538,50 +579,56 @@ export default function App() {
       setUsers(dbUsers.getAll());
     }
     showToast(`Membro ${newMember.name} cadastrado na brigada!`);
-    if (user) {
-      logActivity(
-        'Brigada',
-        'create',
-        `${user.name} cadastrou o membro ${newMember.name} (${newMember.role}) na equipe da brigada`,
-        undefined,
-        newMember.responsibleFloor
-      );
-    }
+    logActivity(
+      'Brigada',
+      'create',
+      `${user.name} cadastrou o membro ${newMember.name} (${newMember.role}) na equipe da brigada`,
+      undefined,
+      newMember.responsibleFloor
+    );
   };
 
   const handleUpdateMember = (updated: BrigadeMember) => {
+    if (!user || user.role !== 'Administrador') {
+      showToast('Apenas administradores podem editar membros.');
+      return;
+    }
     dbBrigade.update(updated);
     setMembers(dbBrigade.getAll());
     showToast(`Dados de ${updated.name} atualizados.`);
-    if (user) {
-      logActivity(
-        'Brigada',
-        'update',
-        `${user.name} atualizou os dados do membro ${updated.name}`,
-        undefined,
-        updated.responsibleFloor
-      );
-    }
+    logActivity(
+      'Brigada',
+      'update',
+      `${user.name} atualizou os dados do membro ${updated.name}`,
+      undefined,
+      updated.responsibleFloor
+    );
   };
 
   const handleDeleteMember = (id: string) => {
+    if (!user || user.role !== 'Administrador') {
+      showToast('Apenas administradores podem excluir membros.');
+      return;
+    }
     const target = members.find((m) => m.id === id);
     dbBrigade.delete(id);
     setMembers(dbBrigade.getAll());
     showToast(`Membro ${target ? target.name : ''} removido da brigada.`);
-    if (user) {
-      logActivity(
-        'Brigada',
-        'delete',
-        `${user.name} removeu o membro ${target ? target.name : id} da brigada`,
-        undefined,
-        target?.responsibleFloor
-      );
-    }
+    logActivity(
+      'Brigada',
+      'delete',
+      `${user.name} removeu o membro ${target ? target.name : id} da brigada`,
+      undefined,
+      target?.responsibleFloor
+    );
   };
 
   // --- Global Database Handlers ---
   const handleImportBackup = (backup: FullDatabaseBackup) => {
+    if (!user || user.role !== 'Administrador') {
+      showToast('Apenas administradores podem importar o banco de dados.');
+      return;
+    }
     importFullDatabase(backup);
     setUsers(dbUsers.getAll());
     setExtinguishers(dbExtinguishers.getAll());
@@ -590,12 +637,14 @@ export default function App() {
     setNotices(dbNotices.getAll());
     setActivityLogs(dbActivityLogs.getAll());
     showToast('Banco de dados restaurado com sucesso!');
-    if (user) {
-      logActivity('Sistema', 'system', `${user.name} restaurou backup completo do banco de dados`);
-    }
+    logActivity('Sistema', 'system', `${user.name} restaurou backup completo do banco de dados`);
   };
 
   const handleResetDatabase = () => {
+    if (!user || user.role !== 'Administrador') {
+      showToast('Apenas administradores podem redefinir o banco de dados.');
+      return;
+    }
     resetDatabaseToInitial();
     setUsers(dbUsers.getAll());
     setExtinguishers(dbExtinguishers.getAll());
@@ -604,25 +653,25 @@ export default function App() {
     setNotices(dbNotices.getAll());
     setActivityLogs(dbActivityLogs.getAll());
     showToast('Banco de dados redefinido.');
-    if (user) {
-      logActivity('Sistema', 'system', `${user.name} redefiniu os dados do sistema para os padrões`);
-    }
+    logActivity('Sistema', 'system', `${user.name} redefiniu os dados do sistema para os padrões`);
   };
 
   const handleSyncBrigadeMembersToDb = () => {
+    if (!user || user.role !== 'Administrador') {
+      showToast('Apenas administradores podem sincronizar o banco.');
+      return;
+    }
     const added = dbUsers.syncFromBrigadeMembers(members);
     if (added.length > 0) {
       setUsers(dbUsers.getAll());
       showToast(
         `${added.length} membro(s) da brigada adicionado(s) ao banco de e-mails!`
       );
-      if (user) {
-        logActivity(
-          'Usuários',
-          'create',
-          `${user.name} sincronizou ${added.length} membro(s) da brigada para o banco de usuários`
-        );
-      }
+      logActivity(
+        'Usuários',
+        'create',
+        `${user.name} sincronizou ${added.length} membro(s) da brigada para o banco de usuários`
+      );
     } else {
       showToast('Todos os membros da brigada já estão cadastrados no banco.');
     }
@@ -715,8 +764,10 @@ export default function App() {
               onAddExtinguisher={handleAddExtinguisher}
               onUpdateExtinguisher={handleUpdateExtinguisher}
               onDeleteExtinguisher={handleDeleteExtinguisher}
-              onRequestSendAttentionEmail={(items) =>
-                void triggerAttentionAlert(items, true)
+              onRequestSendAttentionEmail={
+                user.role === 'Administrador'
+                  ? (items) => void triggerAttentionAlert(items, true)
+                  : undefined
               }
             />
           )}
@@ -799,13 +850,16 @@ export default function App() {
 
           {currentTab === 'avisos' && (
             <NoticesView
+              isAdmin={user.role === 'Administrador'}
               notices={dynamicNotices}
               extinguishers={extinguishers}
               recipientEmails={registeredRecipientEmails}
               serverAlertStatus={serverAlertStatus}
               onNavigate={(tab) => setCurrentTab(tab)}
-              onOpenAttentionEmailModal={(items) =>
-                void triggerAttentionAlert(items, true)
+              onOpenAttentionEmailModal={
+                user.role === 'Administrador'
+                  ? (items) => void triggerAttentionAlert(items, true)
+                  : undefined
               }
             />
           )}
@@ -837,24 +891,26 @@ export default function App() {
         </main>
       </div>
 
-      {/* Gmail Confirmation Modal for Extinguishers in Atenção */}
-      <AttentionEmailConfirmModal
-        isOpen={attentionEmailTargets.length > 0}
-        extinguishers={attentionEmailTargets}
-        recipientEmails={registeredRecipientEmails}
-        user={user}
-        onClose={() => setAttentionEmailTargets([])}
-        onEmailSent={(count, codes, recipients) => {
-          showToast(
-            `E-mail de alerta enviado para ${recipients.length} destinatário(s) do banco!`
-          );
-          logActivity(
-            'Sistema',
-            'system',
-            `${user.name} enviou alerta por e-mail para ${recipients.join(', ')} referente a ${count} extintor(es) em Atenção (${codes.join(', ')})`
-          );
-        }}
-      />
+      {/* Gmail Confirmation Modal for Extinguishers in Atenção (Admin only) */}
+      {user.role === 'Administrador' && (
+        <AttentionEmailConfirmModal
+          isOpen={attentionEmailTargets.length > 0}
+          extinguishers={attentionEmailTargets}
+          recipientEmails={registeredRecipientEmails}
+          user={user}
+          onClose={() => setAttentionEmailTargets([])}
+          onEmailSent={(count, codes, recipients) => {
+            showToast(
+              `E-mail de alerta enviado para ${recipients.length} destinatário(s) do banco!`
+            );
+            logActivity(
+              'Sistema',
+              'system',
+              `${user.name} enviou alerta por e-mail para ${recipients.join(', ')} referente a ${count} extintor(es) em Atenção (${codes.join(', ')})`
+            );
+          }}
+        />
+      )}
     </div>
   );
 }

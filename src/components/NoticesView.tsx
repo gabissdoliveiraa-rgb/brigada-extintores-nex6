@@ -20,6 +20,7 @@ import { ArrowLeft, AlertTriangle, Mail, Send, LogOut, CheckCircle2, Server } fr
 import { ViewTab } from './Sidebar';
 
 interface NoticesViewProps {
+  isAdmin?: boolean;
   notices: Notice[];
   extinguishers?: Extinguisher[];
   recipientEmails?: string[];
@@ -29,6 +30,7 @@ interface NoticesViewProps {
 }
 
 export const NoticesView: React.FC<NoticesViewProps> = ({
+  isAdmin = false,
   notices,
   extinguishers = [],
   recipientEmails = [],
@@ -123,7 +125,11 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
             <span>
               Alertas por E-mail para Extintores em Atenção ({attentionExtinguishers.length})
             </span>
-            {isAutoServerActive ? (
+            {!isAdmin ? (
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-white text-slate-700 border border-slate-300">
+                Envio exclusivo para Administradores
+              </span>
+            ) : isAutoServerActive ? (
               <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
                 <Server className="w-3 h-3" />
                 Envio Automático Ativo ({serverAlertStatus?.senderEmail})
@@ -135,55 +141,59 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
             )}
           </div>
           <p className="text-xs text-amber-800">
-            {isAutoServerActive
+            {!isAdmin
+              ? 'Apenas usuários com perfil Administrador podem disparar alertas automáticos ou manuais por e-mail.'
+              : isAutoServerActive
               ? `Assim que qualquer extintor entra em Atenção (perto de vencer), o servidor envia o alerta automaticamente em segundo plano para os ${effectiveRecipients.length} e-mail(s) cadastrados no banco.`
               : `Quando um extintor entra no status Atenção (perto de vencer), o alerta é preparado para os ${effectiveRecipients.length} e-mail(s) cadastrados em Banco de Dados & E-mails.`}
           </p>
-          {authError && (
+          {isAdmin && authError && (
             <p className="text-xs text-red-600 font-medium">{authError}</p>
           )}
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 shrink-0">
-          {!isAutoServerActive && (
-            needsAuth ? (
-              <GoogleSignInButton
-                onClick={handleGoogleLogin}
-                loading={isLoggingIn}
-                label="Conectar Gmail"
-              />
-            ) : (
-              <div className="flex items-center gap-2 bg-white border border-emerald-200 rounded-full px-3 py-1.5 text-xs text-emerald-700 font-medium">
-                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                <span>{googleEmail || 'Gmail conectado'}</span>
-                <button
-                  type="button"
-                  onClick={handleGoogleLogout}
-                  className="text-slate-400 hover:text-red-600 ml-1 cursor-pointer"
-                  title="Desconectar Gmail"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            )
-          )}
+        {isAdmin && (
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
+            {!isAutoServerActive && (
+              needsAuth ? (
+                <GoogleSignInButton
+                  onClick={handleGoogleLogin}
+                  loading={isLoggingIn}
+                  label="Conectar Gmail"
+                />
+              ) : (
+                <div className="flex items-center gap-2 bg-white border border-emerald-200 rounded-full px-3 py-1.5 text-xs text-emerald-700 font-medium">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>{googleEmail || 'Gmail conectado'}</span>
+                  <button
+                    type="button"
+                    onClick={handleGoogleLogout}
+                    className="text-slate-400 hover:text-red-600 ml-1 cursor-pointer"
+                    title="Desconectar Gmail"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )
+            )}
 
-          {onOpenAttentionEmailModal && (
-            <button
-              type="button"
-              disabled={attentionExtinguishers.length === 0}
-              onClick={() => onOpenAttentionEmailModal(attentionExtinguishers)}
-              className="inline-flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
-            >
-              <Send className="w-3.5 h-3.5" />
-              <span>
-                {isAutoServerActive
-                  ? `Reenviar Agora (${attentionExtinguishers.length})`
-                  : `Enviar Alerta (${attentionExtinguishers.length})`}
-              </span>
-            </button>
-          )}
-        </div>
+            {onOpenAttentionEmailModal && (
+              <button
+                type="button"
+                disabled={attentionExtinguishers.length === 0}
+                onClick={() => onOpenAttentionEmailModal(attentionExtinguishers)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
+              >
+                <Send className="w-3.5 h-3.5" />
+                <span>
+                  {isAutoServerActive
+                    ? `Reenviar Agora (${attentionExtinguishers.length})`
+                    : `Enviar Alerta (${attentionExtinguishers.length})`}
+                </span>
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Filter tabs */}

@@ -12,6 +12,7 @@ import {
 } from '../types/brigada';
 import { formatDate, validateDate } from '../utils/maskUtils';
 import {
+  canPerformAdminAction,
   computeStatusFromValidity,
   filterInspectionsByFloor,
   getDaysUntilDate,
@@ -78,6 +79,7 @@ export const InspectionsView: React.FC<InspectionsViewProps> = ({
   inspections,
   onUpdateInspection,
 }) => {
+  const isAdmin = canPerformAdminAction(user.role);
   const [selectedFloor, setSelectedFloor] = useState<InspectionFloorType>(
     'Térreo - Recepção e Portaria'
   );
@@ -117,6 +119,7 @@ export const InspectionsView: React.FC<InspectionsViewProps> = ({
   });
 
   const handleStartEdit = (insp: Inspection) => {
+    if (!isAdmin) return;
     const effective = getEffectiveInspectionStatus(insp);
     setActiveInspection(insp);
     setEditCode(insp.code);
@@ -172,7 +175,7 @@ export const InspectionsView: React.FC<InspectionsViewProps> = ({
 
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeInspection) return;
+    if (!isAdmin || !activeInspection) return;
 
     const syncedStatus =
       validateDate(editValidityDate) || validateDate(editNextInspectionDate)
@@ -199,8 +202,8 @@ export const InspectionsView: React.FC<InspectionsViewProps> = ({
 
   return (
     <div className="space-y-6 animate-fadeIn">
-      {/* VIEW: EDIT INSPECTION FORM (MacBook Air - 18) */}
-      {activeInspection ? (
+      {/* VIEW: EDIT INSPECTION FORM (Admin only) */}
+      {isAdmin && activeInspection ? (
         <div className="bg-white border border-slate-200/90 rounded-2xl p-6 sm:p-8 shadow-xs">
           <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-100">
             <button
@@ -530,14 +533,14 @@ export const InspectionsView: React.FC<InspectionsViewProps> = ({
                     <th className="pb-3 px-3">Próx. Inspeção</th>
                     <th className="pb-3 px-3">Responsável</th>
                     <th className="pb-3 px-3">Status</th>
-                    <th className="pb-3 px-3 text-right">Ações</th>
+                    {isAdmin && <th className="pb-3 px-3 text-right">Ações</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredInspections.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={8}
+                        colSpan={isAdmin ? 8 : 7}
                         className="py-8 text-center text-xs text-slate-400"
                       >
                         <p>Nenhuma inspeção encontrada para os filtros selecionados.</p>
@@ -603,15 +606,17 @@ export const InspectionsView: React.FC<InspectionsViewProps> = ({
                               </span>
                             )}
                           </td>
-                          <td className="py-3 px-3 text-right">
-                            <button
-                              onClick={() => handleStartEdit(insp)}
-                              className="p-1.5 text-slate-400 hover:text-slate-700 rounded-md hover:bg-slate-100 transition-colors"
-                              aria-label={`Editar inspeção ${insp.code}`}
-                            >
-                              <Pencil className="w-4 h-4" />
-                            </button>
-                          </td>
+                          {isAdmin && (
+                            <td className="py-3 px-3 text-right">
+                              <button
+                                onClick={() => handleStartEdit(insp)}
+                                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-md hover:bg-slate-100 transition-colors cursor-pointer"
+                                aria-label={`Editar inspeção ${insp.code}`}
+                              >
+                                <Pencil className="w-4 h-4" />
+                              </button>
+                            </td>
+                          )}
                         </tr>
                       );
                     })

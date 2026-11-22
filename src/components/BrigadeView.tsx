@@ -103,6 +103,7 @@ export const BrigadeView: React.FC<BrigadeViewProps> = ({
   });
 
   const handleStartCreate = () => {
+    if (!isAdmin) return;
     setFormName('');
     setFormJobTitle('Técnico Operacional');
     setFormRole('Brigadista');
@@ -118,6 +119,7 @@ export const BrigadeView: React.FC<BrigadeViewProps> = ({
   };
 
   const handleStartEdit = (member: BrigadeMember) => {
+    if (!isAdmin) return;
     setActiveMember(member);
     setFormName(member.name);
     setFormJobTitle(member.jobTitle);
@@ -193,7 +195,7 @@ export const BrigadeView: React.FC<BrigadeViewProps> = ({
 
   const handleSaveCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateAll()) return;
+    if (!isAdmin || !validateAll()) return;
 
     const newMember: BrigadeMember = {
       id: `member_${Date.now()}`,
@@ -216,7 +218,7 @@ export const BrigadeView: React.FC<BrigadeViewProps> = ({
 
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeMember || !validateAll()) return;
+    if (!isAdmin || !activeMember || !validateAll()) return;
 
     const updated: BrigadeMember = {
       ...activeMember,
@@ -239,6 +241,7 @@ export const BrigadeView: React.FC<BrigadeViewProps> = ({
   };
 
   const handleConfirmDelete = () => {
+    if (!isAdmin) return;
     if (deleteModalMember) {
       onDeleteMember(deleteModalMember.id);
       setDeleteModalMember(null);
@@ -263,8 +266,8 @@ export const BrigadeView: React.FC<BrigadeViewProps> = ({
         className="hidden"
       />
 
-      {/* VIEW: CREATE MEMBER FORM (MacBook Air - 20) */}
-      {viewMode === 'create' && (
+      {/* VIEW: CREATE MEMBER FORM (Admin only) */}
+      {isAdmin && viewMode === 'create' && (
         <div className="bg-white border border-slate-200/90 rounded-2xl p-6 sm:p-8 shadow-xs">
           <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-100">
             <button
@@ -529,7 +532,7 @@ export const BrigadeView: React.FC<BrigadeViewProps> = ({
       )}
 
       {/* VIEW: EDIT MEMBER FORM (MacBook Air - 27) */}
-      {viewMode === 'edit' && activeMember && (
+      {isAdmin && viewMode === 'edit' && activeMember && (
         <div className="bg-white border border-slate-200/90 rounded-2xl p-6 sm:p-8 shadow-xs">
           <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-100">
             <button

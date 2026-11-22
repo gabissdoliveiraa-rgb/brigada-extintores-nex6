@@ -306,6 +306,15 @@ async function startServer() {
       return;
     }
 
+    if (session.role !== 'Administrador') {
+      res.status(403).json({
+        success: false,
+        forbidden: true,
+        error: 'Apenas administradores têm permissão para enviar alertas automáticos por e-mail.',
+      });
+      return;
+    }
+
     const clientIp = req.ip || 'unknown';
     if (!checkIpRateLimit('send_attention', clientIp, 10, 15 * 60 * 1000)) {
       res.status(429).json({

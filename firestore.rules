@@ -218,11 +218,8 @@ service cloud.firestore {
     match /inspections/{inspectionId} {
       allow get: if isValidId(inspectionId) && (isAdmin() || isSenaiStaff());
       allow list: if isSenaiStaff() && existing().id is string;
-      allow create: if isValidId(inspectionId) && isValidInspection(incoming()) && (isAdmin() || isSenaiStaff());
-      allow update: if isValidId(inspectionId) && isValidInspection(incoming()) && incoming().id == existing().id && (
-        isAdmin() ||
-        (isSenaiStaff() && incoming().diff(existing()).affectedKeys().hasOnly(['date', 'responsible', 'status', 'location', 'capacity', 'validityDate', 'nextInspectionDate', 'notes']))
-      );
+      allow create: if isAdmin() && isValidId(inspectionId) && isValidInspection(incoming());
+      allow update: if isAdmin() && isValidId(inspectionId) && isValidInspection(incoming()) && incoming().id == existing().id;
       allow delete: if isAdmin() && isValidId(inspectionId);
     }
 

@@ -259,6 +259,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
   }, [filteredExtinguishers, selectedFloor, isBuscaRapidaExpanded]);
 
   const handleStartCreate = () => {
+    if (!isAdmin) return;
     setFormCode('');
     setFormType('Pó Químico ABC');
     setFormLocation('');
@@ -275,6 +276,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
   };
 
   const handleStartEdit = (ext: Extinguisher) => {
+    if (!isAdmin) return;
     const effective =
       validateDate(ext.expirationDate || '') || validateDate(ext.nextInspectionDate || '')
         ? computeStatusFromValidity(ext.expirationDate, ext.nextInspectionDate)
@@ -295,7 +297,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
 
   const handleSaveCreate = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formCode.trim()) return;
+    if (!isAdmin || !formCode.trim()) return;
 
     const computedStatus =
       validateDate(formExpirationDate) || validateDate(formNextInspectionDate)
@@ -326,7 +328,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
 
   const handleSaveEdit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeExtinguisher) return;
+    if (!isAdmin || !activeExtinguisher) return;
 
     const computedStatus =
       validateDate(formExpirationDate) || validateDate(formNextInspectionDate)
@@ -354,6 +356,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
   };
 
   const handleConfirmDelete = () => {
+    if (!isAdmin) return;
     if (deleteModalExtinguisher) {
       onDeleteExtinguisher(deleteModalExtinguisher.id);
       setDeleteModalExtinguisher(null);
@@ -394,8 +397,8 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
 
   return (
     <div className="space-y-6 animate-fadeIn">
-      {/* VIEW: CADASTRAR NOVO EXTINTOR (MacBook Air - 16 layout) */}
-      {viewMode === 'create' && (
+      {/* VIEW: CADASTRAR NOVO EXTINTOR (Admin only) */}
+      {isAdmin && viewMode === 'create' && (
         <div className="bg-white border border-slate-200/90 rounded-2xl p-6 sm:p-10 shadow-xs">
           <div className="flex items-center gap-3 mb-8 pb-4 border-b border-slate-100">
             <button
@@ -675,7 +678,7 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
       )}
 
       {/* VIEW: EDIT EXTINGUISHER (MacBook Air - 22) */}
-      {viewMode === 'edit' && activeExtinguisher && (
+      {isAdmin && viewMode === 'edit' && activeExtinguisher && (
         <div className="bg-white border border-slate-200/90 rounded-2xl p-6 sm:p-10 shadow-xs">
           <div className="flex items-center gap-3 mb-8 pb-4 border-b border-slate-100">
             <button
@@ -918,7 +921,8 @@ export const ExtinguishersView: React.FC<ExtinguishersViewProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5">
-              {onRequestSendAttentionEmail &&
+              {isAdmin &&
+                onRequestSendAttentionEmail &&
                 extinguishers.some((e) => e.status === 'Atenção') && (
                   <button
                     type="button"
