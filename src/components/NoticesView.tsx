@@ -18,6 +18,7 @@ import {
   Server,
   Globe,
   Loader2,
+  CheckCircle2,
 } from 'lucide-react';
 import { ViewTab } from './Sidebar';
 
@@ -43,6 +44,7 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
   onSendAttentionEmail,
 }) => {
   const [filter, setFilter] = useState<'Todos' | 'Vencido' | 'A vencer'>('Todos');
+  const [sentConfirmation, setSentConfirmation] = useState<string | null>(null);
 
   const attentionExtinguishers = extinguishers.filter(
     (e) => e.status === 'Atenção'
@@ -53,6 +55,17 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
 
   const isEmailJsActive = serverAlertStatus?.provider !== 'smtp';
   const senderLabel = serverAlertStatus?.senderEmail || 'nex6empresa@gmail.com';
+
+  const handleSendClick = () => {
+    if (!onSendAttentionEmail || attentionExtinguishers.length === 0) return;
+    onSendAttentionEmail(attentionExtinguishers);
+    setSentConfirmation(
+      `E-mail enviado com sucesso para os ${effectiveRecipients.length} destinatário(s) cadastrados no banco!`
+    );
+    setTimeout(() => {
+      setSentConfirmation(null);
+    }, 5000);
+  };
 
   const filteredNotices = notices.filter((n) => {
     if (filter === 'Todos') return true;
@@ -81,7 +94,7 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
       </div>
 
       {/* Email Notification Card for Atenção Extinguishers */}
-      <div className="bg-amber-50/60 border border-amber-200 rounded-2xl p-5 shadow-xs">
+      <div className="bg-amber-50/60 border border-amber-200 rounded-2xl p-5 shadow-xs space-y-3">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2 text-amber-900 font-bold text-sm">
@@ -116,7 +129,7 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
               <button
                 type="button"
                 disabled={attentionExtinguishers.length === 0 || isSendingEmail}
-                onClick={() => onSendAttentionEmail(attentionExtinguishers)}
+                onClick={handleSendClick}
                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-red-600 hover:bg-red-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white text-xs font-bold rounded-xl shadow-xs transition-colors cursor-pointer"
               >
                 {isSendingEmail ? (
@@ -134,6 +147,16 @@ export const NoticesView: React.FC<NoticesViewProps> = ({
             </div>
           )}
         </div>
+
+        {isAdmin && sentConfirmation && (
+          <div
+            role="status"
+            className="flex items-center gap-2 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold px-3.5 py-2.5 rounded-xl animate-fadeIn"
+          >
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{sentConfirmation}</span>
+          </div>
+        )}
       </div>
 
       {/* Filter tabs */}

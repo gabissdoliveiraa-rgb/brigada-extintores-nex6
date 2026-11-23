@@ -180,3 +180,35 @@ test('cleanForFirestore removes undefined/null and dbUsers.update upserts missin
   assert.ok(updated);
   assert.equal(updated?.name, 'Usuário Remoto Editado');
 });
+
+test('all initial brigade/user emails except Melissa and João use first-name@senaisp.edu.br and legacy caches migrate', () => {
+  resetDatabaseToInitial();
+  const users = dbUsers.getAll();
+  const members = dbBrigade.getAll();
+
+  assert.equal(dbUsers.findByEmail('melissajesus@senaisp.edu.br')?.name, 'Melissa Jesus');
+  assert.equal(dbUsers.findByEmail('joaosouza@senaisp.edu.br')?.name, 'João Souza');
+  assert.equal(dbUsers.findByEmail('ana@senaisp.edu.br')?.name, 'Ana Silva');
+  assert.equal(dbUsers.findByEmail('carlos@senaisp.edu.br')?.name, 'Carlos Lima');
+  assert.equal(dbUsers.findByEmail('patricia@senaisp.edu.br')?.name, 'Patrícia Mendes');
+
+  for (const m of members) {
+    if (m.name === 'Melissa Jesus') {
+      assert.equal(m.email, 'melissajesus@senaisp.edu.br');
+    } else if (m.name === 'João Souza') {
+      assert.equal(m.email, 'joaosouza@senaisp.edu.br');
+    } else {
+      assert.ok(!m.email.includes('.lima') && !m.email.startsWith('anasilva'), `Unexpected legacy email ${m.email}`);
+      assert.ok(/^[a-z]+@senaisp\.edu\.br$/.test(m.email), `Expected first-name email, got ${m.email}`);
+    }
+  }
+
+  // Legacy cached record normalization
+  localStorage.setItem(
+    'senai_db_users_v2',
+    JSON.stringify([{ ...users[0], id: 'usr_member_1', name: 'Ana Silva', email: 'anasilva@senaisp.edu.br' }])
+  );
+  const migratedUsers = dbUsers.getAll();
+  assert.equal(migratedUsers[0].email, 'ana@senaisp.edu.br');
+});
+

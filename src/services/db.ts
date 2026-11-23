@@ -234,6 +234,33 @@ export function cleanForFirestore<T>(data: T): T {
   return data;
 }
 
+const LEGACY_EMAIL_TO_FIRSTNAME: Record<string, string> = {
+  'anasilva@senaisp.edu.br': 'ana@senaisp.edu.br',
+  'carlos.lima@senaisp.edu.br': 'carlos@senaisp.edu.br',
+  'fernanda.queiros@senaisp.edu.br': 'fernanda@senaisp.edu.br',
+  'sebastian.alves@senaisp.edu.br': 'sebastian@senaisp.edu.br',
+  'maria.oliveira@senaisp.edu.br': 'maria@senaisp.edu.br',
+  'lucas.martins@senaisp.edu.br': 'lucas@senaisp.edu.br',
+  'juliana.costa@senaisp.edu.br': 'juliana@senaisp.edu.br',
+  'rodrigo.barbosa@senaisp.edu.br': 'rodrigo@senaisp.edu.br',
+  'patricia.mendes@senaisp.edu.br': 'patricia@senaisp.edu.br',
+  'gabriel.ribeiro@senaisp.edu.br': 'gabriel@senaisp.edu.br',
+};
+
+function normalizeEmailRecord<T extends { email?: string }>(
+  record: T
+): { item: T; changed: boolean } {
+  const current = (record.email || '').trim().toLowerCase();
+  const replacement = LEGACY_EMAIL_TO_FIRSTNAME[current];
+  if (replacement && replacement !== record.email) {
+    return {
+      item: { ...record, email: replacement },
+      changed: true,
+    };
+  }
+  return { item: record, changed: false };
+}
+
 // --- USERS & EMAILS CRUD ---
 export const dbUsers = {
   getAll: (): RegisteredUser[] => {
@@ -245,7 +272,16 @@ export const dbUsers = {
       saveToStorage(KEYS.USERS, INITIAL_USERS);
       return INITIAL_USERS;
     }
-    return list;
+    let anyChanged = false;
+    const normalized = list.map((u) => {
+      const res = normalizeEmailRecord(u);
+      if (res.changed) anyChanged = true;
+      return res.item;
+    });
+    if (anyChanged) {
+      saveToStorage(KEYS.USERS, normalized);
+    }
+    return normalized;
   },
   subscribe: (cb: Listener<RegisteredUser[]>): (() => void) => {
     listeners.users.add(cb);
@@ -646,7 +682,16 @@ export const dbBrigade = {
       saveToStorage(KEYS.MEMBERS, INITIAL_BRIGADE_MEMBERS);
       return INITIAL_BRIGADE_MEMBERS;
     }
-    return list;
+    let anyChanged = false;
+    const normalized = list.map((m) => {
+      const res = normalizeEmailRecord(m);
+      if (res.changed) anyChanged = true;
+      return res.item;
+    });
+    if (anyChanged) {
+      saveToStorage(KEYS.MEMBERS, normalized);
+    }
+    return normalized;
   },
   subscribe: (cb: Listener<BrigadeMember[]>): (() => void) => {
     listeners.members.add(cb);
@@ -981,7 +1026,26 @@ export function initFirestoreRealtimeSync(): () => void {
             dbBrigade.saveAll(INITIAL_BRIGADE_MEMBERS);
           } else if (!snapshot.empty) {
             const remoteList: BrigadeMember[] = [];
-            snapshot.forEach((d) => remoteList.push(d.data() as BrigadeMember));
+            const toFix: BrigadeMember[] = [];
+            snapshot.forEach((d) => {
+              const res = normalizeEmailRecord(d.data() as BrigadeMember);
+              remoteList.push(res.item);
+              if (res.changed) toFix.push(res.item);
+            });
+            if (toFix.length > 0 && db && isBootAdmin) {
+              for (let i = 0; i < toFix.length; i += 400) {
+                const batch = writeBatch(db);
+                toFix.slice(i, i + 400).forEach((member) => {
+                  batch.set(
+                    doc(db!, 'brigade_members', sanitizeDocId(member.id)),
+                    cleanForFirestore(member)
+                  );
+                });
+                batch.commit().catch((err) =>
+                  handleFirestoreError(err, OperationType.WRITE, 'brigade_members')
+                );
+              }
+            }
             latestMembers = remoteList;
             saveToStorage(KEYS.MEMBERS, remoteList);
             notify(listeners.members, remoteList);
@@ -1005,10 +1069,28 @@ export function initFirestoreRealtimeSync(): () => void {
             markBrigadeUsersBackfillDone();
           } else if (!snapshot.empty) {
             const remoteList: RegisteredUser[] = [];
+            const toFix: RegisteredUser[] = [];
             snapshot.forEach((d) => {
               const data = d.data() as RegisteredUser;
-              remoteList.push({ ...data, id: data.id || d.id });
+              const withId = { ...data, id: data.id || d.id };
+              const res = normalizeEmailRecord(withId);
+              remoteList.push(res.item);
+              if (res.changed) toFix.push(res.item);
             });
+            if (toFix.length > 0 && db && isBootAdmin) {
+              for (let i = 0; i < toFix.length; i += 400) {
+                const batch = writeBatch(db);
+                toFix.slice(i, i + 400).forEach((u) => {
+                  batch.set(
+                    doc(db!, 'users', sanitizeDocId(u.id)),
+                    cleanForFirestore(u)
+                  );
+                });
+                batch.commit().catch((err) =>
+                  handleFirestoreError(err, OperationType.WRITE, 'users')
+                );
+              }
+            }
             saveToStorage(KEYS.USERS, remoteList);
             notify(listeners.users, remoteList);
             if (remoteList.some((u) => !isPasswordHashed(u.password))) {
